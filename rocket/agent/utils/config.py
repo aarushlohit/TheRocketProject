@@ -12,6 +12,7 @@ from agent.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+TRACE_MODE = True
 
 
 @dataclass
@@ -22,6 +23,8 @@ class Config:
     host: str = "0.0.0.0"
     port: int = 8765
     log_level: str = "INFO"
+    debug_mode: bool = True
+    trace_mode: bool = TRACE_MODE
     
     # Platform
     platform_type: str = "auto"  # auto, windows, macos, linux
@@ -70,6 +73,8 @@ def load_config(config_path: Optional[Path] = None) -> Config:
                 config.host = agent_cfg.get("host", config.host)
                 config.port = agent_cfg.get("port", config.port)
                 config.log_level = agent_cfg.get("log_level", config.log_level)
+                config.debug_mode = agent_cfg.get("debug_mode", config.debug_mode)
+                config.trace_mode = agent_cfg.get("trace_mode", config.trace_mode)
             
             if "platform" in data:
                 platform_cfg = data["platform"]
@@ -125,6 +130,8 @@ agent:
   host: 0.0.0.0
   port: 8765
   log_level: INFO
+  debug_mode: true
+  trace_mode: true
 
 platform:
   type: auto  # auto-detect platform

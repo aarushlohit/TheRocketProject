@@ -1,0 +1,22 @@
+# git ls-files --others --exclude-from=.git/info/exclude
+# Lines that start with '#' are comments.
+# For a project mostly in C, the following would be a good set of
+# exclude patterns (uncomment them if you want to use them):
+# *.[oa]
+# *~
+
+# >>> opencode:workspace-gitignore >>>
+.env
+.ENV
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+data/
+logs/
+mobile_app/.dart_tool/
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+mobile_app/.packages
+mobile_app/build/
+# <<< opencode:workspace-gitignore <<<

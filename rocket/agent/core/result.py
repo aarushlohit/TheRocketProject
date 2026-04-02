@@ -28,6 +28,7 @@ class Result:
         assert self.status in [
             "success",
             "error",
+            "debug",
             "executing",
             "clarification_needed",
         ], f"Invalid status: {self.status}"

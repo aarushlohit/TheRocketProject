@@ -7,6 +7,32 @@
 
 ---
 
+## Stage 0.10 Addendum
+
+Date: 2026-04-02
+
+The backend has since been upgraded beyond the original foundation state.
+
+Latest notable backend improvements:
+
+- fixed Pollinations text-endpoint 404s by replacing the oversized prompt with a short URL-safe prompt
+- moved strict structure recovery into backend parsing with `safe_json_parse()` and `fallback_parse()`
+- preserved text-first intent derivation so execution is not driven by hallucinated model slots
+- kept multi-candidate reasoning and ranking for messy handwriting
+- added blocked responses for uncertain intent instead of executing weak guesses
+- retained full trace logging across image input, model request, parsing, ranking, and execution planning
+
+Current verification status for this Stage 0.10 backend pass:
+
+- `PYTHONPATH=. .venv/bin/pytest -q` → `51 passed`
+- `PYTHONPATH=. .venv/bin/python -m compileall agent` → success
+
+Detailed implementation notes for this pass live in:
+
+- `report_0.10.md`
+
+---
+
 ## Executive Summary
 
 The Rocket project foundation has been successfully initialized as a **clean, production-grade codebase** ready for Phase 0 development. All core documentation, architecture, backend skeleton, and setup infrastructure are in place.

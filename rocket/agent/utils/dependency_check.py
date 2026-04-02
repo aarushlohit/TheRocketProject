@@ -16,14 +16,16 @@ logger = get_logger(__name__)
 HAS_WMCTRL = False
 HAS_SCROT = False
 HAS_XDG_OPEN = False
+HAS_HYPRCTL = False
+HAS_GRIM = False
 
 
 async def check_and_prepare_dependencies() -> None:
     """Check required tools, attempt safe installs, and never crash startup."""
-    global HAS_WMCTRL, HAS_SCROT, HAS_XDG_OPEN
+    global HAS_WMCTRL, HAS_SCROT, HAS_XDG_OPEN, HAS_HYPRCTL, HAS_GRIM
 
     logger.info("[INFO] Checking system dependencies...")
-    os_name, distro_id = detect_environment()
+    os_name, distro_id = detect_os_distribution()
 
     if os_name == "linux":
         distro_label = distro_id or "unknown"
@@ -55,6 +57,22 @@ async def check_and_prepare_dependencies() -> None:
         required=False,
         fallback_message="PIL screenshot fallback enabled",
     )
+    HAS_HYPRCTL = await _check_dependency(
+        command="hyprctl",
+        package_name="hyprland",
+        os_name=os_name,
+        distro_id=distro_id,
+        required=False,
+        fallback_message="Hyprland window control disabled",
+    )
+    HAS_GRIM = await _check_dependency(
+        command="grim",
+        package_name="grim",
+        os_name=os_name,
+        distro_id=distro_id,
+        required=False,
+        fallback_message="screenshot disabled",
+    )
 
 
 def is_installed(command: str) -> bool:
@@ -73,7 +91,7 @@ def is_installed(command: str) -> bool:
         return False
 
 
-def detect_environment() -> tuple[str, str | None]:
+def detect_os_distribution() -> tuple[str, str | None]:
     """Predict the current OS and Linux distro when possible."""
     os_name = platform.system().lower()
     if os_name != "linux":

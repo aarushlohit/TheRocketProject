@@ -48,10 +48,21 @@ class FakePlatform:
         return screenshot_path
 
 
+class FailingPlatform(FakePlatform):
+    async def open_app(self, app_name: str) -> None:
+        raise RuntimeError(f"could not launch {app_name}")
+
+
 def test_executor_routes_open_app():
     with TemporaryDirectory() as temp_dir:
         platform = FakePlatform()
-        executor = ActionExecutor(platform=platform, artifacts_dir=Path(temp_dir))
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="linux",
+            availability_checker=lambda app, platform: True,
+        )
 
         result = asyncio.run(
             executor.execute(
@@ -59,15 +70,20 @@ def test_executor_routes_open_app():
             )
         )
 
-        assert platform.calls == [("open_app", "chrome")]
+        assert platform.calls == [("open_app", "google-chrome-stable")]
         assert result.status == "success"
-        assert result.message == "Opened Chrome"
+        assert result.message == "Opened Google-Chrome-Stable"
 
 
 def test_executor_routes_screenshot():
     with TemporaryDirectory() as temp_dir:
         platform = FakePlatform()
-        executor = ActionExecutor(platform=platform, artifacts_dir=Path(temp_dir))
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            availability_checker=lambda app, platform: True,
+        )
 
         result = asyncio.run(
             executor.execute(
@@ -78,3 +94,70 @@ def test_executor_routes_screenshot():
         assert platform.calls == [("screenshot", temp_dir)]
         assert result.status == "success"
         assert result.data["screenshot_path"].endswith("shot.png")
+
+
+def test_executor_returns_debug_in_dry_run_mode():
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=True,
+            platform_type="macos",
+            availability_checker=lambda app, platform: True,
+        )
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="OPEN_APP", parameters={"app": "calculator"}, confidence=0.95)
+            )
+        )
+
+        assert platform.calls == []
+        assert result.status == "debug"
+        assert result.message == "Dry run executed"
+        assert result.data["intent"] == "OPEN_APP"
+        assert result.data["slots"]["app"] == "Calculator"
+
+
+def test_executor_catches_platform_errors():
+    with TemporaryDirectory() as temp_dir:
+        platform = FailingPlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: True,
+        )
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="OPEN_APP", parameters={"app": "calculator"}, confidence=0.95)
+            )
+        )
+
+        assert result.status == "error"
+        assert result.message == "could not launch calc"
+
+
+def test_executor_returns_app_not_installed():
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: False,
+        )
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="OPEN_APP", parameters={"app": "calculator"}, confidence=0.95)
+            )
+        )
+
+        assert platform.calls == []
+        assert result.status == "error"
+        assert result.message == "App not installed"

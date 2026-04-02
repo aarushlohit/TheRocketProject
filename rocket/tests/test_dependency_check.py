@@ -15,9 +15,11 @@ def test_check_and_prepare_dependencies_sets_flags(monkeypatch):
             "xdg-open": True,
             "wmctrl": False,
             "scrot": True,
+            "hyprctl": True,
+            "grim": False,
         }[kwargs["command"]]
 
-    monkeypatch.setattr(dependency_check, "detect_environment", lambda: ("linux", "arch"))
+    monkeypatch.setattr(dependency_check, "detect_os_distribution", lambda: ("linux", "arch"))
     monkeypatch.setattr(dependency_check, "_check_dependency", fake_check_dependency)
 
     asyncio.run(dependency_check.check_and_prepare_dependencies())
@@ -25,3 +27,5 @@ def test_check_and_prepare_dependencies_sets_flags(monkeypatch):
     assert dependency_check.HAS_XDG_OPEN is True
     assert dependency_check.HAS_WMCTRL is False
     assert dependency_check.HAS_SCROT is True
+    assert dependency_check.HAS_HYPRCTL is True
+    assert dependency_check.HAS_GRIM is False

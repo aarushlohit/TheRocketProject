@@ -1,10 +1,10 @@
 # Nova Stage 0 - Python Dependencies
 # Python 3.11+
 
-httpx==0.28.1
 loguru==0.7.3
 Pillow==12.1.1
 PyYAML==6.0.3
 qrcode==8.2
 pytest==9.0.2
+requests==2.33.1
 websockets==16.0

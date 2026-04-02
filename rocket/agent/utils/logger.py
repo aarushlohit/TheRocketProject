@@ -25,6 +25,8 @@ def setup_logging(level: str = "INFO"):
     logs_dir.mkdir(exist_ok=True)
 
     if loguru_logger is not None:
+        loguru_logger.level("INFO", color="<blue>")
+        loguru_logger.level("ERROR", color="<red>")
         loguru_logger.remove()
         loguru_logger.add(
             sys.stderr,

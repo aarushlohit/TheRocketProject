@@ -18,6 +18,7 @@ from pathlib import Path
 from agent.core.nova_stage0 import NovaStageZeroAgent
 from agent.server.websocket_handler import start_websocket_server
 from agent.stage0.pairing import PairingManager
+from agent.stage0.pipeline import validate_api_key
 from agent.utils.config import load_config
 from agent.utils.dependency_check import check_and_prepare_dependencies
 from agent.utils.env import load_local_env
@@ -70,6 +71,9 @@ async def main():
     if not api_key:
         logger.error("POLLINATIONS_API_KEY is required in .env or the process environment")
         sys.exit(1)
+
+    # Validate the API key at boot time
+    validate_api_key(api_key)
 
     agent = None
 
