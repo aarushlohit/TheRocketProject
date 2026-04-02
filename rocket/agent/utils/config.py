@@ -1,5 +1,7 @@
 """Configuration loading."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -17,7 +19,7 @@ class Config:
     """Agent configuration."""
     
     # Server
-    host: str = "localhost"
+    host: str = "0.0.0.0"
     port: int = 8765
     log_level: str = "INFO"
     
@@ -29,7 +31,7 @@ class Config:
     disabled_skills: list = field(default_factory=list)
     
     # NLU
-    confidence_threshold: float = 0.7
+    confidence_threshold: float = 0.6
     ask_on_ambiguous: bool = True
     
     # Models
@@ -37,6 +39,7 @@ class Config:
     device: str = "auto"  # cuda, cpu, mps, auto
     
     # Additional settings
+    data_dir: Path = Path("data/stage0")
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -81,6 +84,12 @@ def load_config(config_path: Optional[Path] = None) -> Config:
                 nlu_cfg = data["nlu"]
                 config.confidence_threshold = nlu_cfg.get("confidence_threshold", config.confidence_threshold)
                 config.ask_on_ambiguous = nlu_cfg.get("ask_on_ambiguous", config.ask_on_ambiguous)
+
+            if "storage" in data:
+                storage_cfg = data["storage"]
+                configured_dir = storage_cfg.get("data_dir")
+                if configured_dir:
+                    config.data_dir = Path(configured_dir)
             
             if "models" in data:
                 models_cfg = data["models"]
@@ -113,7 +122,7 @@ def create_default_config() -> None:
     default_config = """# Rocket Agent Configuration
 
 agent:
-  host: localhost
+  host: 0.0.0.0
   port: 8765
   log_level: INFO
 
@@ -131,8 +140,11 @@ skills:
   disabled: []
 
 nlu:
-  confidence_threshold: 0.7
+  confidence_threshold: 0.6
   ask_on_ambiguous: true
+
+storage:
+  data_dir: data/stage0
 
 models:
   whisper_model: base  # tiny, base, small, medium, large

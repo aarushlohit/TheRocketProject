@@ -1,7 +1,10 @@
 """Platform adapter - abstracts OS-specific operations."""
 
+from __future__ import annotations
+
 import sys
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from agent.utils.logger import get_logger
 
@@ -62,21 +65,43 @@ class PlatformAdapter(ABC):
         pass
 
     @abstractmethod
-    async def screenshot(self) -> bytes:
-        """Capture screen.
-        
-        Returns:
-            Screenshot bytes (PNG)
-        """
-        pass
-
-    @abstractmethod
     async def get_focused_window(self) -> dict:
         """Get currently focused window.
         
         Returns:
             Window info dict
         """
+        pass
+
+    @abstractmethod
+    async def close_app(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> None:
+        """Close an application or the focused window."""
+        pass
+
+    @abstractmethod
+    async def minimize(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> None:
+        """Minimize an application window."""
+        pass
+
+    @abstractmethod
+    async def maximize(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> None:
+        """Maximize an application window."""
+        pass
+
+    @abstractmethod
+    async def open_url(self, url: str) -> None:
+        """Open a URL in the system browser."""
+        pass
+
+    @abstractmethod
+    async def screenshot(self, output_dir: Path) -> Path:
+        """Capture a screenshot and return the saved path."""
         pass
 
 

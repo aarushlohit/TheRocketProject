@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """
-Rocket PC Agent - Main Entry Point
-
-This is the core automation agent that runs on the user's desktop.
-It listens for commands from the mobile app via WebSocket and executes them.
+Nova Stage 0 backend entry point.
 
 Usage:
     python agent/main.py --config ~/.rocket/config.yaml
-    python agent/main.py --host localhost --port 8765
+    python agent/main.py --host 0.0.0.0 --port 8765
 """
+
+from __future__ import annotations
 
 import asyncio
 import argparse
+import os
 import sys
 from pathlib import Path
 
-from agent.core.agent import Agent
-from agent.utils.logger import get_logger
-from agent.utils.config import load_config
+from agent.core.nova_stage0 import NovaStageZeroAgent
 from agent.server.websocket_handler import start_websocket_server
+from agent.stage0.pairing import PairingManager
+from agent.utils.config import load_config
+from agent.utils.dependency_check import check_and_prepare_dependencies
+from agent.utils.env import load_local_env
+from agent.utils.logger import get_logger, setup_logging
 
 
 logger = get_logger(__name__)
@@ -37,8 +40,8 @@ async def main():
     )
     parser.add_argument(
         "--host",
-        default="localhost",
-        help="WebSocket server host (default: localhost)",
+        default="0.0.0.0",
+        help="WebSocket server host (default: 0.0.0.0)",
     )
     parser.add_argument(
         "--port",
@@ -59,30 +62,37 @@ async def main():
     )
 
     args = parser.parse_args()
+    load_local_env(Path.cwd())
+    setup_logging("DEBUG" if args.debug else args.log_level)
+    await check_and_prepare_dependencies()
 
-    # Set log level
-    import logging
-    logging.getLogger("agent").setLevel(
-        "DEBUG" if args.debug else args.log_level
-    )
+    api_key = os.environ.get("POLLINATIONS_API_KEY")
+    if not api_key:
+        logger.error("POLLINATIONS_API_KEY is required in .env or the process environment")
+        sys.exit(1)
+
+    agent = None
 
     try:
-        # Load configuration
         config = load_config(args.config)
         config.host = args.host
         config.port = args.port
+        config.data_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize agent
-        agent = Agent(config)
-        logger.info(f"Rocket Agent initialized")
+        pairing = PairingManager(storage_dir=config.data_dir / "pairing", port=args.port)
+        payload = pairing.load_or_create()
+        pairing.print_qr(payload)
+        logger.info(f"Pairing payload: ip={payload.ip} port={payload.port}")
 
-        # Override config with CLI args if provided
-        agent.config.host = args.host
-        agent.config.port = args.port
+        agent = NovaStageZeroAgent(config=config, api_key=api_key)
+        logger.info("Nova Stage 0 backend ready")
 
-        # Start WebSocket server
-        logger.info(f"Starting WebSocket server on {args.host}:{args.port}")
-        await start_websocket_server(agent, args.host, args.port)
+        await start_websocket_server(
+            agent=agent,
+            token=payload.token,
+            host=args.host,
+            port=args.port,
+        )
 
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user")
@@ -90,6 +100,9 @@ async def main():
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
         sys.exit(1)
+    finally:
+        if agent is not None:
+            await agent.close()
 
 
 if __name__ == "__main__":

@@ -1,59 +1,73 @@
-"""WebSocket server handler."""
+"""Authenticated WebSocket server for Stage 0 drawing uploads."""
+
+from __future__ import annotations
 
 import asyncio
 import json
 import uuid
-from typing import Optional
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import websockets
-from websockets.server import WebSocketServerProtocol
 
-from agent.core.agent import Agent
+from agent.core.nova_stage0 import NovaStageZeroAgent
 from agent.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
 
 
-async def handle_connection(websocket: WebSocketServerProtocol, path: str):
-    """Handle WebSocket connection from mobile app.
-    
-    Args:
-        websocket: WebSocket connection
-        path: Connection path
-    """
+async def handle_connection(
+    websocket: Any,
+    *,
+    agent: NovaStageZeroAgent,
+    token: str,
+):
+    """Handle a mobile connection after validating its pairing token."""
     client_id = str(uuid.uuid4())[:8]
+    path = _extract_request_path(websocket)
+    if not _is_authenticated(path, token):
+        logger.warning(f"Rejected unauthenticated client: {client_id}")
+        await websocket.send(
+            json.dumps(
+                {
+                    "status": "error",
+                    "intent": None,
+                    "message": "Invalid pairing token",
+                }
+            )
+        )
+        await websocket.close(code=4401, reason="Invalid token")
+        return
+
     logger.info(f"Client connected: {client_id}")
+    await websocket.send(
+        json.dumps(
+            {
+                "status": "connected",
+                "intent": None,
+                "message": "Nova backend connected",
+            }
+        )
+    )
 
     try:
         async for message in websocket:
             try:
-                await handle_message(websocket, message, client_id)
-            except json.JSONDecodeError:
-                logger.warning(f"Invalid JSON from {client_id}")
-                await websocket.send(
-                    json.dumps(
-                        {
-                            "id": "unknown",
-                            "type": "error",
-                            "payload": {
-                                "error_code": "INVALID_JSON",
-                                "message": "Invalid JSON message",
-                            },
-                        }
-                    )
+                await handle_message(
+                    websocket=websocket,
+                    message=message,
+                    client_id=client_id,
+                    agent=agent,
                 )
             except Exception as e:
                 logger.error(f"Error handling message: {e}")
                 await websocket.send(
                     json.dumps(
                         {
-                            "id": "unknown",
-                            "type": "error",
-                            "payload": {
-                                "error_code": "INTERNAL_ERROR",
-                                "message": str(e),
-                            },
+                            "status": "error",
+                            "intent": None,
+                            "message": str(e),
                         }
                     )
                 )
@@ -65,128 +79,73 @@ async def handle_connection(websocket: WebSocketServerProtocol, path: str):
 
 
 async def handle_message(
-    websocket: WebSocketServerProtocol, message: str, client_id: str
+    websocket: Any,
+    message: str | bytes,
+    client_id: str,
+    agent: NovaStageZeroAgent,
 ):
-    """Handle incoming WebSocket message.
-    
-    Args:
-        websocket: WebSocket connection
-        message: Incoming message JSON
-        client_id: Client identifier
-    """
+    """Handle either a binary drawing upload or a small JSON control message."""
+    if isinstance(message, bytes):
+        logger.info(f"Drawing upload received from {client_id}: {len(message)} bytes")
+        response = await agent.handle_drawing_image(message)
+        await websocket.send(json.dumps(response))
+        return
+
+    logger.debug(f"Text message from {client_id}: {message}")
     msg_data = json.loads(message)
-    msg_type = msg_data.get("type")
-    msg_id = msg_data.get("id", "unknown")
-    payload = msg_data.get("payload", {})
-
-    logger.debug(f"Message from {client_id}: type={msg_type}, id={msg_id}")
-
-    # Route by message type
-    if msg_type == "voice_input":
-        await handle_voice_input(websocket, msg_id, payload)
-    elif msg_type == "drawing_input":
-        await handle_drawing_input(websocket, msg_id, payload)
-    elif msg_type == "heartbeat":
-        await handle_heartbeat(websocket, msg_id)
-    else:
-        logger.warning(f"Unknown message type: {msg_type}")
+    if msg_data.get("type") == "ping":
         await websocket.send(
             json.dumps(
                 {
-                    "id": msg_id,
-                    "type": "error",
-                    "payload": {
-                        "error_code": "UNKNOWN_MESSAGE_TYPE",
-                        "message": f"Unknown message type: {msg_type}",
-                    },
+                    "status": "alive",
+                    "intent": None,
+                    "message": "pong",
                 }
             )
         )
+        return
 
-
-async def handle_voice_input(
-    websocket: WebSocketServerProtocol, msg_id: str, payload: dict
-):
-    """Handle voice input message.
-    
-    Args:
-        websocket: WebSocket connection
-        msg_id: Message ID for tracking
-        payload: Message payload
-    """
-    text = payload.get("text", "")
-    confidence = payload.get("confidence", 1.0)
-
-    logger.info(f"Voice input: '{text}' (confidence: {confidence})")
-
-    # In real implementation, this would get the agent instance
-    # For now, placeholder response
-    result_payload = {
-        "status": "executing",
-        "message": f"Processing: {text}",
-        "action_id": str(uuid.uuid4()),
-    }
-
-    await websocket.send(
-        json.dumps({"id": msg_id, "type": "response", "payload": result_payload})
-    )
-
-
-async def handle_drawing_input(
-    websocket: WebSocketServerProtocol, msg_id: str, payload: dict
-):
-    """Handle drawing input message.
-    
-    Args:
-        websocket: WebSocket connection
-        msg_id: Message ID
-        payload: Message payload
-    """
-    strokes = payload.get("strokes", [])
-    logger.info(f"Drawing input: {len(strokes)} strokes")
-
-    result_payload = {
-        "status": "executing",
-        "recognized_action": "gesture_processing",
-        "action_id": str(uuid.uuid4()),
-    }
-
-    await websocket.send(
-        json.dumps({"id": msg_id, "type": "response", "payload": result_payload})
-    )
-
-
-async def handle_heartbeat(websocket: WebSocketServerProtocol, msg_id: str):
-    """Handle heartbeat message.
-    
-    Args:
-        websocket: WebSocket connection
-        msg_id: Message ID
-    """
-    logger.debug(f"Heartbeat received: {msg_id}")
-    await websocket.send(
-        json.dumps(
-            {
-                "id": msg_id,
-                "type": "heartbeat",
-                "payload": {"sender": "agent", "status": "alive"},
-            }
-        )
-    )
+    raise ValueError("Expected binary drawing data or a ping message")
 
 
 async def start_websocket_server(
-    agent: Agent, host: str = "localhost", port: int = 8765
+    agent: NovaStageZeroAgent,
+    token: str,
+    host: str = "0.0.0.0",
+    port: int = 8765,
 ):
-    """Start WebSocket server.
-    
-    Args:
-        agent: Agent instance
-        host: Server host
-        port: Server port
-    """
+    """Start the Stage 0 WebSocket server."""
     logger.info(f"Starting WebSocket server on {host}:{port}")
 
-    async with websockets.serve(handle_connection, host, port):
+    async with websockets.serve(
+        lambda websocket: handle_connection(
+            websocket,
+            agent=agent,
+            token=token,
+        ),
+        host,
+        port,
+        max_size=5 * 1024 * 1024,
+    ):
         logger.info(f"WebSocket server listening on ws://{host}:{port}")
-        await asyncio.Event().wait()
+        await asyncio.get_running_loop().create_future()
+
+
+def _is_authenticated(path: str, expected_token: str) -> bool:
+    parsed = urlparse(path)
+    query = parse_qs(parsed.query)
+    received_token = query.get("token", [None])[0]
+    return received_token == expected_token
+
+
+def _extract_request_path(websocket: Any) -> str:
+    path = getattr(websocket, "path", None)
+    if isinstance(path, str):
+        return path
+
+    request = getattr(websocket, "request", None)
+    request_path = getattr(request, "path", None)
+    if isinstance(request_path, str):
+        return request_path
+
+    return ""

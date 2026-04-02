@@ -1,0 +1,5 @@
+I planned to make a software for blind people to make ease of the laptop or personal computer in this AI era many cant use the tech cuz of disability so what i thought is making a mobile app first then later into hardware first mobile app should be  consist of 4 feature like voice to action if they said open chatgpt and go to settings and change the password it should do automatically in laptop !! voice feature,draw 2 action in  a big canvas they can draw like open chrme  the canva will be sent to backend reciever of agent to pc same app is installed both devices same app in sense app to give input in mobile to get the input and process in the backend  reciever app
+
+so voice(english first then other languages),braille 8 dot method if they dont knew english they can use 8 dot braille language futhur we can change to 16 dot braille also.....
+
+this is whole app we can use openclaw at backend must be sandboxed why openclaw like we are using it can go with ui level thing like opening a browswer going too deep

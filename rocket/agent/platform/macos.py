@@ -1,6 +1,9 @@
 """macOS platform adapter."""
 
+from __future__ import annotations
+
 import subprocess
+from pathlib import Path
 
 from agent.platform.adapter import PlatformAdapter
 from agent.utils.logger import get_logger
@@ -41,14 +44,30 @@ class MacOSAdapter(PlatformAdapter):
         logger.info(f"Scroll (macOS) {direction} {amount}")
         # Implementation: PyObjC scroll events
 
-    async def screenshot(self) -> bytes:
+    async def screenshot(self, output_dir: Path) -> Path:
         """Take screenshot on macOS (placeholder)."""
-        logger.info("Screenshot (macOS)")
-        # Implementation: PIL or screencapture
-        return b""
+        raise NotImplementedError("Stage 0 screenshot support is implemented on Linux first")
 
     async def get_focused_window(self) -> dict:
         """Get focused window on macOS (placeholder)."""
         logger.info("Get focused window (macOS)")
         # Implementation: PyObjC window methods
         return {}
+
+    async def close_app(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> None:
+        raise NotImplementedError("Stage 0 close support is implemented on Linux first")
+
+    async def minimize(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> None:
+        raise NotImplementedError("Stage 0 minimize support is implemented on Linux first")
+
+    async def maximize(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> None:
+        raise NotImplementedError("Stage 0 maximize support is implemented on Linux first")
+
+    async def open_url(self, url: str) -> None:
+        subprocess.Popen(["open", url])

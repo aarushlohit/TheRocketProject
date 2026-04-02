@@ -1,32 +1,10 @@
-# Rocket PC Agent - Python Dependencies
+# Nova Stage 0 - Python Dependencies
 # Python 3.11+
 
-# Core dependencies
-websockets==12.0              # WebSocket server
-pyyaml==6.0                  # Config file parsing
-loguru==0.7.2                # Structured logging
-
-# NLU & Intent Parsing
-spacy==3.7.2                 # NLP tokenization and entity recognition
-regex==2023.11.8             # Advanced regex patterns
-
-# Platform control
-pyautogui==0.9.53            # Cross-platform mouse/keyboard automation
-pyperclip==1.8.2             # Clipboard operations
-
-# OCR & Vision (optional for Phase 0)
-opencv-python==4.8.1.78      # Image preprocessing for gestures
-pytesseract==0.3.10          # OCR (requires tesseract binary)
-
-# Speech-to-Text (optional in Phase 0)
-# openai-whisper==20231117    # Uncomment for local Whisper support
-
-# Testing
-pytest==7.4.3               # Test framework
-pytest-asyncio==0.21.1      # Async test support
-pytest-cov==4.1.0           # Coverage reporting
-
-# Development
-black==23.11.0              # Code formatting
-ruff==0.1.8                 # Fast linting
-mypy==1.7.1                 # Static type checking
+httpx==0.28.1
+loguru==0.7.3
+Pillow==12.1.1
+PyYAML==6.0.3
+qrcode==8.2
+pytest==9.0.2
+websockets==16.0
