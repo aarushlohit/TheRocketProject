@@ -104,6 +104,17 @@ class PlatformAdapter(ABC):
         """Capture a screenshot and return the saved path."""
         pass
 
+    async def search_web(self, query: str) -> dict:
+        """Search the web using default browser.
+        
+        Default implementation opens Google search URL.
+        Subclasses can override for platform-specific behavior.
+        """
+        import webbrowser
+        search_url = f"https://www.google.com/search?q={query}"
+        webbrowser.open(search_url)
+        return {"status": "success", "query": query}
+
 
 def get_platform_adapter(platform_type: str = "auto") -> PlatformAdapter:
     """Get platform-specific adapter.

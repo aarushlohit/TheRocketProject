@@ -136,78 +136,93 @@ def parse_intent(text: str) -> dict:
     return {"intent": "UNKNOWN"}
 
 
+def clean_json_response(text: str) -> str:
+    """Clean JSON response by removing markdown code blocks."""
+    text = text.strip()
+    
+    # Handle ```json ... ``` blocks
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    
+    if text.endswith("```"):
+        text = text[:-3]
+    
+    return text.strip()
+
+
+# =============================================================================
+# HARDENED MODEL CALLING (PRODUCTION-GRADE)
+# =============================================================================
+# Import hardened pipeline with circuit breaker, retry, rate limiting
+from agent.core.hardened_pipeline import (
+    call_model_hardened,
+    validate_and_execute_check,
+    validate_image_url,
+    CONFIDENCE_THRESHOLD as HARDENED_CONFIDENCE_THRESHOLD,
+)
+from agent.core.circuit_breaker import get_circuit_breaker
+from agent.core.rate_limiter import get_rate_limiter
+
+
+def call_gemini(image_url: str, api_key: str) -> dict:
+    """
+    Call Gemini via Pollinations Chat Completions.
+    
+    NOTE: This is a legacy wrapper. Use call_model_hardened() for production.
+    """
+    from agent.core.hardened_pipeline import call_gemini_with_retry
+    
+    circuit_breaker = get_circuit_breaker()
+    result, error = call_gemini_with_retry(image_url, api_key, circuit_breaker)
+    
+    if result is None:
+        raise Exception(f"Gemini failed: {error}")
+    
+    return result
+
+
+def call_qwen(image_url: str, api_key: str) -> dict:
+    """
+    Call Qwen Vision as fallback model.
+    
+    NOTE: This is a legacy wrapper. Use call_model_hardened() for production.
+    """
+    from agent.core.hardened_pipeline import call_qwen_with_retry
+    
+    circuit_breaker = get_circuit_breaker()
+    result, error = call_qwen_with_retry(image_url, api_key, circuit_breaker)
+    
+    if result is None:
+        raise Exception(f"Qwen failed: {error}")
+    
+    return result
+
+
+def call_model_with_fallback(image_url: str, api_key: str) -> dict:
+    """
+    HARDENED model call with automatic fallback: Gemini → Qwen.
+    
+    Features:
+    - Circuit breaker (disables failed models temporarily)
+    - Exponential backoff retry (3 attempts per model)
+    - Rate limiting (1 request per 2 seconds)
+    - Image validation
+    - Comprehensive logging
+    - Graceful degradation (never crashes)
+    
+    Returns:
+    - On success: parsed intent JSON with _model_used
+    - On failure: status="error" with reason and retryable flag
+    """
+    return call_model_hardened(image_url, api_key, validate_image=True)
+
+
+# Legacy function for compatibility
 def call_model(image_url: str, api_key: str) -> dict:
-    """Call Pollinations Chat Completions for multimodal OCR with STRICT JSON output."""
-    url = "https://gen.pollinations.ai/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    body = {
-        "model": "gemini-fast",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            }
-        ],
-    }
-
-    print("\n========== [IMAGE URL] ==========")
-    print(image_url)
-
-    print("\n========== [CHAT REQUEST BODY] ==========")
-    print(body)
-
-    response = requests.post(url, headers=headers, json=body, timeout=90)
-
-    print("\n========== [MODEL STATUS] ==========")
-    print(response.status_code)
-
-    print("\n========== [MODEL RAW RESPONSE] ==========")
-    print(response.text)
-
-    if response.status_code != 200:
-        raise Exception(f"Model request failed with status {response.status_code}")
-
-    data = response.json()
-    content = data["choices"][0]["message"]["content"]
-
-    print("\n========== [MODEL JSON OUTPUT] ==========")
-    print(content)
-
-    # Parse JSON safely
-    try:
-        # Strip markdown code blocks if present
-        clean_content = content.strip()
-        if clean_content.startswith("```json"):
-            clean_content = clean_content[7:]
-        if clean_content.startswith("```"):
-            clean_content = clean_content[3:]
-        if clean_content.endswith("```"):
-            clean_content = clean_content[:-3]
-        clean_content = clean_content.strip()
-
-        parsed = json.loads(clean_content)
-        print("\n========== [PARSED JSON] ==========")
-        print(parsed)
-        return parsed
-    except json.JSONDecodeError as e:
-        print(f"\n[JSON ERROR] {e}")
-        print(f"[RAW CONTENT] {content}")
-        # Return fallback structure
-        return {
-            "intent": "UNKNOWN",
-            "slots": {},
-            "confidence": 0.0,
-            "normalized_text": content.strip(),
-            "parse_error": str(e),
-        }
+    """Call model with automatic fallback (Gemini → Qwen)."""
+    return call_model_with_fallback(image_url, api_key)
 
 
 class DrawToActionPipeline:
