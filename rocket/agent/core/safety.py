@@ -24,6 +24,8 @@ DANGEROUS_PATTERNS = [
     "mkfs",
     "dd if=",
     ":(){:|:&};:",  # fork bomb
+    "chmod 777",
+    "chmod -R 777",
     
     # Windows destructive commands
     "format",
@@ -37,10 +39,32 @@ DANGEROUS_PATTERNS = [
     # Registry / system
     "reg delete",
     "regedit",
+    "bcdedit",
     
     # Network / security
     "netsh advfirewall",
-    "bcdedit",
+    
+    # Script execution (injection risk)
+    "powershell -e",
+    "powershell -enc",
+    "cmd /c",
+    "curl | bash",
+    "wget | bash",
+    "curl | sh",
+    "wget | sh",
+    "iex(",  # PowerShell Invoke-Expression
+    "invoke-expression",
+    
+    # Crypto / ransom patterns
+    "encrypt",
+    "decrypt",
+    "bitcoin",
+    "wallet",
+    
+    # Credential theft
+    "mimikatz",
+    "password",
+    "credential",
 ]
 
 DANGEROUS_KEY_COMBOS = [

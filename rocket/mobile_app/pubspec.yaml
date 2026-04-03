@@ -12,6 +12,12 @@ dependencies:
   cupertino_icons: ^1.0.8
   mobile_scanner: ^6.0.2
   shared_preferences: ^2.3.2
+  # TTS for voice feedback
+  flutter_tts: ^4.2.0
+  # Vibration for haptic feedback
+  vibration: ^2.0.0
+  # Provider for state management
+  provider: ^6.1.2
 
 dev_dependencies:
   flutter_test:

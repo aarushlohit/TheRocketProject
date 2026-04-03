@@ -176,12 +176,16 @@ def try_open_exe(app_name: str) -> bool:
     return False
 
 
-def open_via_search(app_name: str) -> bool:
+def open_via_search(app_name: str, retry: bool = True) -> bool:
     """
-    STEP 2: Fallback - Open app via Windows Search.
+    STEP 2: Fallback - Open app via Windows Search (PATCHED).
     Uses pyautogui to simulate Win key + typing + Enter.
     
     This works for ANY app installed on Windows, even if not in PATH.
+    
+    PATCHED:
+    - Increased delays for reliability
+    - Retry logic for verification
     """
     pyautogui = get_pyautogui()
     
@@ -197,20 +201,34 @@ def open_via_search(app_name: str) -> bool:
         
         # Press Windows key to open Start menu
         pyautogui.press("win")
-        time.sleep(0.6)
+        time.sleep(1.0)  # PATCHED: Increased from 0.6
         
         # Type the app name
-        pyautogui.write(search_name, interval=0.05)
-        time.sleep(1.2)
+        pyautogui.write(search_name, interval=0.08)  # PATCHED: Slower typing
+        time.sleep(1.5)  # PATCHED: Increased from 1.2 (wait for search results)
         
         # Press Enter to launch
         pyautogui.press("enter")
+        time.sleep(0.5)  # Brief pause after enter
         
         print(f"[SEARCH SUCCESS] Launched via search: {search_name}")
         return True
         
     except Exception as e:
         print(f"[SEARCH ERROR] {e}")
+        
+        # PATCHED: Retry once
+        if retry:
+            print("[SEARCH RETRY] Attempting retry...")
+            time.sleep(1.0)
+            # Press Escape to clear any partial state
+            try:
+                pyautogui.press("escape")
+            except:
+                pass
+            time.sleep(0.5)
+            return open_via_search(app_name, retry=False)
+        
         return False
 
 

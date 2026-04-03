@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/app_theme.dart';
+
 class QuadrantTile extends StatelessWidget {
   const QuadrantTile({
     required this.title,
@@ -22,57 +24,50 @@ class QuadrantTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      onDoubleTap: onDoubleTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        margin: const EdgeInsets.all(12),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: active ? backgroundColor.withOpacity(0.92) : backgroundColor,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: active ? Colors.black : Colors.black12,
-            width: active ? 2.4 : 1.0,
+    return Semantics(
+      button: true,
+      label: '$title. $subtitle',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        onDoubleTap: onDoubleTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.all(AppTheme.spacingS),
+          padding: const EdgeInsets.all(AppTheme.spacingL),
+          decoration: AppTheme.cardDecoration(
+            backgroundColor: backgroundColor,
+            isSelected: active,
           ),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: active ? 22 : 12,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: <Widget>[
-            Icon(icon, size: 34, color: Colors.black87),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black87,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 34,
+                color: AppTheme.textPrimary.withOpacity(0.85),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    title,
+                    style: AppTheme.headingMedium,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    height: 1.35,
-                    color: Colors.black54,
+                  const SizedBox(height: AppTheme.spacingS),
+                  Text(
+                    subtitle,
+                    style: AppTheme.bodySmall.copyWith(
+                      height: 1.35,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

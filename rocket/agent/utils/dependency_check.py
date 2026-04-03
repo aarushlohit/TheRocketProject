@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-import platform as py_platform
 import subprocess
+import sys
 from pathlib import Path
+
+# Explicitly get stdlib platform module to avoid confusion with agent.platform
+import importlib
+_py_platform = importlib.import_module('platform')
 
 from agent.utils.logger import get_logger
 
@@ -93,7 +97,7 @@ def is_installed(command: str) -> bool:
 
 def detect_os_distribution() -> tuple[str, str | None]:
     """Predict the current OS and Linux distro when possible."""
-    os_name = py_platform.system().lower()
+    os_name = _py_platform.system().lower()
     if os_name != "linux":
         return os_name, None
 
