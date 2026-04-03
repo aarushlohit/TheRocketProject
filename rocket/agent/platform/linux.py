@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import webbrowser
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 
@@ -79,7 +79,7 @@ class LinuxAdapter(PlatformAdapter):
     async def screenshot(self, output_dir: Path) -> Path:
         """Take screenshot on Linux and save it to disk."""
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"screenshot_{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}.png"
+        output_path = output_dir / f"screenshot_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}.png"
 
         if self.env in {"hyprland", "wayland"} and dependency_check.HAS_GRIM:
             self._run_command(["grim", str(output_path)])

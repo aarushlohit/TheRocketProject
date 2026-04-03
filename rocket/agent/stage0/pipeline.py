@@ -1,10 +1,11 @@
-"""Image processing + OCR-first inference pipeline for handwritten draw-to-action input."""
+"""Image processing + STRICT JSON inference pipeline for handwritten draw-to-action input."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from pprint import pformat
 
@@ -23,6 +24,43 @@ from agent.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+# =============================================================================
+# STRICT JSON SYSTEM PROMPT (STAGE 1 UPGRADE)
+# =============================================================================
+SYSTEM_PROMPT = """
+You are an assistive AI system that interprets handwritten commands.
+
+CRITICAL:
+Return ONLY valid JSON. No explanation. No markdown.
+
+TASK:
+- Extract text from image
+- Correct spelling
+- Infer intent
+
+SUPPORTED INTENTS:
+OPEN_APP → {"app": "<name>"}
+OPEN_URL → {"url": "<url>"}
+SEARCH_WEB → {"query": "<text>"}
+TYPE_TEXT → {"text": "<text>"}
+UNKNOWN → {}
+
+RULES:
+- Fix spelling errors
+- Do NOT invent apps
+- If unclear → UNKNOWN
+- Confidence between 0 and 1
+
+OUTPUT FORMAT:
+{
+  "intent": "",
+  "slots": {},
+  "confidence": 0.0,
+  "normalized_text": ""
+}
+"""
 
 
 @dataclass
@@ -98,8 +136,8 @@ def parse_intent(text: str) -> dict:
     return {"intent": "UNKNOWN"}
 
 
-def call_model(image_url: str, api_key: str) -> str:
-    """Call Pollinations Chat Completions for multimodal OCR."""
+def call_model(image_url: str, api_key: str) -> dict:
+    """Call Pollinations Chat Completions for multimodal OCR with STRICT JSON output."""
     url = "https://gen.pollinations.ai/v1/chat/completions"
 
     headers = {
@@ -113,12 +151,15 @@ def call_model(image_url: str, api_key: str) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "decode and extract text"},
+                    {"type": "text", "text": SYSTEM_PROMPT},
                     {"type": "image_url", "image_url": {"url": image_url}},
                 ],
             }
         ],
     }
+
+    print("\n========== [IMAGE URL] ==========")
+    print(image_url)
 
     print("\n========== [CHAT REQUEST BODY] ==========")
     print(body)
@@ -132,11 +173,41 @@ def call_model(image_url: str, api_key: str) -> str:
     print(response.text)
 
     if response.status_code != 200:
-        raise Exception("Model request failed")
+        raise Exception(f"Model request failed with status {response.status_code}")
 
     data = response.json()
-    text = data["choices"][0]["message"]["content"]
-    return text.strip()
+    content = data["choices"][0]["message"]["content"]
+
+    print("\n========== [MODEL JSON OUTPUT] ==========")
+    print(content)
+
+    # Parse JSON safely
+    try:
+        # Strip markdown code blocks if present
+        clean_content = content.strip()
+        if clean_content.startswith("```json"):
+            clean_content = clean_content[7:]
+        if clean_content.startswith("```"):
+            clean_content = clean_content[3:]
+        if clean_content.endswith("```"):
+            clean_content = clean_content[:-3]
+        clean_content = clean_content.strip()
+
+        parsed = json.loads(clean_content)
+        print("\n========== [PARSED JSON] ==========")
+        print(parsed)
+        return parsed
+    except json.JSONDecodeError as e:
+        print(f"\n[JSON ERROR] {e}")
+        print(f"[RAW CONTENT] {content}")
+        # Return fallback structure
+        return {
+            "intent": "UNKNOWN",
+            "slots": {},
+            "confidence": 0.0,
+            "normalized_text": content.strip(),
+            "parse_error": str(e),
+        }
 
 
 class DrawToActionPipeline:
@@ -276,7 +347,7 @@ class DrawToActionPipeline:
         return None
 
     def _save_image(self, image_bytes: bytes) -> Path:
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         output_path = self.received_dir / f"drawing_{timestamp}.png"
         output_path.write_bytes(image_bytes)
         self._trace_block("INPUT IMAGE", str(output_path))
@@ -322,7 +393,7 @@ class DrawToActionPipeline:
         self._trace_block("IMAGE URL", image_url)
         return image_url
 
-    async def _infer_with_model(self, image_url: str) -> str:
+    async def _infer_with_model(self, image_url: str) -> dict:
         return await asyncio.to_thread(call_model, image_url, self.api_key)
 
     async def _infer_attempt(
@@ -335,36 +406,48 @@ class DrawToActionPipeline:
         model: str,
     ) -> InferenceCandidate:
         try:
-            ocr_text = await self._infer_with_model(image_url=image_url)
-            print("[OCR TEXT]", ocr_text)
+            # Model now returns parsed JSON dict
+            model_output = await self._infer_with_model(image_url=image_url)
 
-            raw_text = ocr_text.strip().lower()
-            clean_text = raw_text.replace("\n", " ").strip()
-            intent_result = parse_intent(clean_text)
+            print("\n========== [MODEL OUTPUT RECEIVED] ==========")
+            print(model_output)
 
-            print("[OCR TEXT]")
-            print(clean_text)
-            print("[PARSED INTENT]")
-            print(intent_result)
+            # Extract fields from strict JSON response
+            intent_name = model_output.get("intent", "UNKNOWN")
+            slots = model_output.get("slots", {})
+            confidence = model_output.get("confidence", 0.0)
+            normalized_text = model_output.get("normalized_text", "")
 
-            self._trace_block("OCR TEXT", clean_text or "MISSING")
-            self._trace_block("PARSED INTENT", intent_result)
+            print(f"[INTENT] {intent_name}")
+            print(f"[SLOTS] {slots}")
+            print(f"[CONFIDENCE] {confidence}")
+            print(f"[NORMALIZED TEXT] {normalized_text}")
 
-            intent, message = self._build_intent(clean_text, intent_result)
+            self._trace_block("MODEL JSON", model_output)
+
+            # Build intent from JSON response
+            intent, message = self._build_intent_from_json(
+                intent_name=intent_name,
+                slots=slots,
+                confidence=confidence,
+                normalized_text=normalized_text,
+            )
+
             return InferenceCandidate(
                 intent=intent,
-                normalized_text=clean_text,
+                normalized_text=normalized_text,
                 model=model,
                 input_image_path=input_image_path,
                 variant_name=variant_name,
                 image_path=variant_path,
                 image_url=image_url,
-                raw_model_output=ocr_text,
+                raw_model_output=str(model_output),
                 message=message,
                 valid=intent.action != "UNKNOWN",
             )
         except Exception as exc:
-            self._trace_block("PARSED INTENT", {"intent": "UNKNOWN", "error": str(exc)})
+            print(f"\n[INFERENCE ERROR] {exc}")
+            self._trace_block("INFERENCE ERROR", {"error": str(exc)})
             return InferenceCandidate(
                 intent=build_unknown_intent(
                     message="Could not determine intent",
@@ -382,59 +465,114 @@ class DrawToActionPipeline:
                 valid=False,
             )
 
-    def _build_intent(self, clean_text: str, parsed_intent: dict) -> tuple[Intent, str]:
-        action = parsed_intent.get("intent")
+    def _build_intent_from_json(
+        self,
+        intent_name: str,
+        slots: dict,
+        confidence: float,
+        normalized_text: str,
+    ) -> tuple[Intent, str]:
+        """Build Intent from strict JSON model response."""
+        print(f"\n========== [BUILDING INTENT] ==========")
+        print(f"Intent: {intent_name}, Slots: {slots}, Confidence: {confidence}")
 
-        if action == "OPEN_APP":
-            raw_app = parsed_intent.get("app")
+        if intent_name == "OPEN_APP":
+            raw_app = slots.get("app")
             corrected_app = correct_app(raw_app) if isinstance(raw_app, str) else None
-            if not corrected_app or corrected_app not in KNOWN_APPS:
+            print(f"[APP RESOLUTION] raw={raw_app} -> corrected={corrected_app}")
+
+            if not corrected_app:
                 return (
                     build_unknown_intent(
-                        message="Could not determine intent",
+                        message="Could not determine app",
                         confidence=0.4,
-                        normalized_text=clean_text,
+                        normalized_text=normalized_text,
                     ),
-                    "Could not determine intent",
+                    "Could not determine app",
                 )
 
             return (
                 Intent(
                     action="OPEN_APP",
                     parameters={"app": corrected_app},
-                    confidence=0.9,
-                    metadata={"normalized_text": clean_text},
+                    confidence=confidence if confidence > 0 else 0.9,
+                    metadata={"normalized_text": normalized_text},
                 ),
-                "Intent parsed from OCR text",
+                "Intent parsed from model JSON",
             )
 
-        if action == "CLOSE_APP":
+        if intent_name == "OPEN_URL":
+            url = slots.get("url")
+            if not url:
+                return (
+                    build_unknown_intent(
+                        message="No URL provided",
+                        confidence=0.4,
+                        normalized_text=normalized_text,
+                    ),
+                    "No URL provided",
+                )
+            return (
+                Intent(
+                    action="OPEN_URL",
+                    parameters={"url": url},
+                    confidence=confidence if confidence > 0 else 0.9,
+                    metadata={"normalized_text": normalized_text},
+                ),
+                "Intent parsed from model JSON",
+            )
+
+        if intent_name == "SEARCH_WEB":
+            query = slots.get("query", normalized_text)
+            return (
+                Intent(
+                    action="SEARCH_WEB",
+                    parameters={"query": query},
+                    confidence=confidence if confidence > 0 else 0.85,
+                    metadata={"normalized_text": normalized_text},
+                ),
+                "Intent parsed from model JSON",
+            )
+
+        if intent_name == "TYPE_TEXT":
+            text = slots.get("text", "")
+            return (
+                Intent(
+                    action="TYPE_TEXT",
+                    parameters={"text": text},
+                    confidence=confidence if confidence > 0 else 0.85,
+                    metadata={"normalized_text": normalized_text},
+                ),
+                "Intent parsed from model JSON",
+            )
+
+        if intent_name == "CLOSE_APP":
             return (
                 Intent(
                     action="CLOSE_APP",
                     parameters={"target": "focused"},
-                    confidence=0.85,
-                    metadata={"normalized_text": clean_text},
+                    confidence=confidence if confidence > 0 else 0.85,
+                    metadata={"normalized_text": normalized_text},
                 ),
-                "Intent parsed from OCR text",
+                "Intent parsed from model JSON",
             )
 
-        if action == "SCREENSHOT":
+        if intent_name == "SCREENSHOT":
             return (
                 Intent(
                     action="SCREENSHOT",
                     parameters={},
-                    confidence=0.85,
-                    metadata={"normalized_text": clean_text},
+                    confidence=confidence if confidence > 0 else 0.85,
+                    metadata={"normalized_text": normalized_text},
                 ),
-                "Intent parsed from OCR text",
+                "Intent parsed from model JSON",
             )
 
         return (
             build_unknown_intent(
                 message="Could not determine intent",
                 confidence=0.4,
-                normalized_text=clean_text,
+                normalized_text=normalized_text,
             ),
             "Could not determine intent",
         )

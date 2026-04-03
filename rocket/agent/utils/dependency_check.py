@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import platform
+import platform as py_platform
 import subprocess
 from pathlib import Path
 
@@ -93,7 +93,7 @@ def is_installed(command: str) -> bool:
 
 def detect_os_distribution() -> tuple[str, str | None]:
     """Predict the current OS and Linux distro when possible."""
-    os_name = platform.system().lower()
+    os_name = py_platform.system().lower()
     if os_name != "linux":
         return os_name, None
 
@@ -178,7 +178,7 @@ async def _attempt_install(
 
 
 def _build_install_command(package_name: str) -> list[str] | None:
-    if os.geteuid() == 0:
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
         return ["pacman", "-S", "--noconfirm", package_name]
 
     if is_installed("sudo"):

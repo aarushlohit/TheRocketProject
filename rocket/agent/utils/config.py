@@ -23,7 +23,7 @@ class Config:
     host: str = "0.0.0.0"
     port: int = 8765
     log_level: str = "INFO"
-    debug_mode: bool = True
+    debug_mode: bool = False  # Changed to False for REAL execution (Stage 1)
     trace_mode: bool = TRACE_MODE
     
     # Platform
@@ -130,7 +130,7 @@ agent:
   host: 0.0.0.0
   port: 8765
   log_level: INFO
-  debug_mode: true
+  debug_mode: false  # Set to false for REAL execution (Stage 1)
   trace_mode: true
 
 platform:
