@@ -1,4 +1,13 @@
-"""Image processing + STRICT JSON inference pipeline for handwritten draw-to-action input."""
+"""Image processing + STRICT JSON inference pipeline for handwritten draw-to-action input.
+
+STAGE 4 ENHANCED:
+- JSON-first model output
+- Multi-variant consistency analysis
+- Strict validation layer
+- Execution trust scoring
+- Smart planner integration
+- Comprehensive logging
+"""
 
 from __future__ import annotations
 
@@ -22,45 +31,74 @@ from agent.stage0.validation import (
 )
 from agent.utils.logger import get_logger
 
+# Stage 4 imports
+from agent.core.json_validator import (
+    JSONValidator,
+    ValidationResult,
+    get_json_validator,
+    validate_intent_json,
+)
+from agent.core.consistency_engine import (
+    ConsistencyEngine,
+    ConsistencyResult,
+    get_consistency_engine,
+    analyze_consistency,
+)
+from agent.core.trust_evaluator import (
+    TrustEvaluator,
+    TrustDecision,
+    get_trust_evaluator,
+    evaluate_trust,
+)
+
 
 logger = get_logger(__name__)
 
 
 # =============================================================================
-# STRICT JSON SYSTEM PROMPT (STAGE 1 UPGRADE)
+# STAGE 4 — JSON-FIRST SYSTEM PROMPT (ENHANCED)
 # =============================================================================
-SYSTEM_PROMPT = """
-You are an assistive AI system that interprets handwritten commands.
+SYSTEM_PROMPT = """You are an assistive AI system that interprets handwritten commands.
 
-CRITICAL:
-Return ONLY valid JSON. No explanation. No markdown.
-
-TASK:
-- Extract text from image
-- Correct spelling
-- Infer intent
+CRITICAL RULES:
+1. Return ONLY valid JSON — NO markdown, NO explanation, NO code blocks
+2. NEVER include command words inside slot values
+   - BAD: {"query": "search github"}
+   - GOOD: {"query": "github"}
+3. Multiple actions = MUST use MULTI_STEP intent
 
 SUPPORTED INTENTS:
-OPEN_APP → {"app": "<name>"}
-OPEN_URL → {"url": "<url>"}
-SEARCH_WEB → {"query": "<text>"}
-TYPE_TEXT → {"text": "<text>"}
-UNKNOWN → {}
+- OPEN_APP: Open an application
+- OPEN_URL: Open a URL
+- SEARCH_WEB: Search the web
+- TYPE_TEXT: Type text
+- PRESS_KEYS: Press keyboard keys
+- MULTI_STEP: Multiple sequential actions
+- UNKNOWN: Cannot determine intent
 
-RULES:
-- Fix spelling errors
-- Do NOT invent apps
-- If unclear → UNKNOWN
-- Confidence between 0 and 1
+SLOT REQUIREMENTS:
+- OPEN_APP: {"app": "app_name"}
+- SEARCH_WEB: {"query": "search_terms_only"}
+- TYPE_TEXT: {"text": "text_to_type"}
+- MULTI_STEP: {"steps": [{"intent": "...", "slots": {...}}, ...]}
+
+EXTRACTION RULES:
+1. Fix spelling (e.g., "chrom" → "chrome")
+2. Remove noise words (please, can you)
+3. Extract ONLY essential values
+4. "open X and search Y" → MULTI_STEP
+
+CONFIDENCE: 0.0 to 1.0 (1.0 = crystal clear)
 
 OUTPUT FORMAT:
 {
-  "intent": "",
+  "intent": "INTENT_TYPE",
   "slots": {},
   "confidence": 0.0,
-  "normalized_text": ""
+  "normalized_text": "cleaned text"
 }
-"""
+
+RESPOND WITH JSON ONLY."""
 
 
 @dataclass
@@ -83,7 +121,11 @@ class InferenceCandidate:
 
 @dataclass
 class InferenceResult:
-    """Selected inference result after multi-variant OCR evaluation."""
+    """
+    Selected inference result after multi-variant OCR evaluation.
+    
+    STAGE 4 ENHANCED: Includes consistency and trust metadata.
+    """
 
     intent: Intent
     normalized_text: str
@@ -96,6 +138,12 @@ class InferenceResult:
     message: str
     ranking_score: float
     candidates: list[InferenceCandidate]
+    
+    # Stage 4 metadata (optional for backward compatibility)
+    consistency_score: float = 0.0
+    trust_score: float = 0.0
+    should_execute: bool = True
+    validation_passed: bool = True
 
 
 def validate_api_key(api_key: str) -> bool:
@@ -250,10 +298,33 @@ class DrawToActionPipeline:
         *,
         preferred_app: str | None = None,
     ) -> InferenceResult:
-        """Save, preprocess, run OCR, and select the safest parsed intent."""
+        """
+        STAGE 4 ENHANCED: Process drawing with full stabilization pipeline.
+        
+        Flow:
+        1. Save image + create variants
+        2. Run inference on all variants (original, rotated_90, rotated_270)
+        3. Analyze consistency across variants
+        4. Validate JSON structure
+        5. Evaluate trust score
+        6. Select best result
+        
+        Returns:
+            InferenceResult with selected intent and metadata
+        """
+        print(f"\n{'='*70}")
+        print(f"[STAGE 4 PIPELINE] Processing drawing")
+        print(f"{'='*70}")
+        
         input_image_path = self._save_image(image_bytes)
         candidates: list[InferenceCandidate] = []
+        raw_json_outputs: list[dict] = []  # Store raw JSON for consistency analysis
 
+        # =================================================================
+        # STEP 1: Run inference on all variants
+        # =================================================================
+        print(f"\n[STEP 1] Running multi-variant inference")
+        
         for variant_name, variant_path in self._create_variants(input_image_path):
             image_url = await asyncio.to_thread(self._upload_image, variant_path)
             candidate = await self._infer_attempt(
@@ -264,6 +335,15 @@ class DrawToActionPipeline:
                 model="gemini-fast",
             )
             candidates.append(candidate)
+            
+            # Extract raw JSON for consistency analysis
+            raw_json_outputs.append({
+                "intent": candidate.intent.action,
+                "slots": candidate.intent.parameters,
+                "confidence": candidate.intent.confidence,
+                "normalized_text": candidate.normalized_text,
+                "variant": variant_name,
+            })
 
         self._trace_block(
             "ALL CANDIDATES",
@@ -280,6 +360,67 @@ class DrawToActionPipeline:
                 for candidate in candidates
             ],
         )
+
+        # =================================================================
+        # STEP 2: Stage 4 Consistency Analysis
+        # =================================================================
+        print(f"\n[STEP 2] Analyzing multi-variant consistency")
+        
+        consistency_result = analyze_consistency(raw_json_outputs)
+        
+        self._trace_block(
+            "CONSISTENCY RESULT",
+            {
+                "consistency_score": consistency_result.consistency_score,
+                "agreement_ratio": consistency_result.agreement_ratio,
+                "final_score": consistency_result.final_score,
+                "voting": consistency_result.voting_breakdown,
+            },
+        )
+
+        # =================================================================
+        # STEP 3: Stage 4 JSON Validation
+        # =================================================================
+        print(f"\n[STEP 3] Validating selected intent")
+        
+        validation_result = validate_intent_json(consistency_result.selected_intent)
+        
+        self._trace_block(
+            "VALIDATION RESULT",
+            {
+                "valid": validation_result.valid,
+                "errors": validation_result.errors,
+                "warnings": validation_result.warnings,
+                "confidence": validation_result.confidence,
+            },
+        )
+
+        # =================================================================
+        # STEP 4: Stage 4 Trust Evaluation
+        # =================================================================
+        print(f"\n[STEP 4] Evaluating execution trust")
+        
+        trust_decision = evaluate_trust(
+            confidence=consistency_result.confidence,
+            consistency_score=consistency_result.consistency_score,
+            validation_passed=validation_result.valid,
+            validation_warnings=len(validation_result.warnings),
+        )
+        
+        self._trace_block(
+            "TRUST DECISION",
+            {
+                "should_execute": trust_decision.should_execute,
+                "final_score": trust_decision.final_score,
+                "reason": trust_decision.reason,
+                "recommendations": trust_decision.recommendations,
+            },
+        )
+
+        # =================================================================
+        # STEP 5: Select best result using Stage 2 ranking
+        # =================================================================
+        print(f"\n[STEP 5] Selecting best candidate")
 
         ranked_candidates = rank_candidates(candidates, preferred_app=preferred_app)
         self._trace_block(
@@ -302,6 +443,10 @@ class DrawToActionPipeline:
             threshold=max(self.confidence_threshold, RANKING_THRESHOLD),
         )
         selected = ranked_choice.candidate if ranked_choice is not None else None
+        
+        # =================================================================
+        # STEP 6: Build final result with Stage 4 metadata
+        # =================================================================
         if selected is None:
             unknown_intent = build_unknown_intent(
                 message="Could not determine intent",
@@ -316,6 +461,7 @@ class DrawToActionPipeline:
                     "text": "",
                     "intent": unknown_intent.action,
                     "score": 0.0,
+                    "stage4_trust": trust_decision.final_score,
                 },
             )
             return InferenceResult(
@@ -330,9 +476,27 @@ class DrawToActionPipeline:
                 message="Could not determine intent",
                 ranking_score=0.0,
                 candidates=candidates,
+                # Stage 4 metadata
+                consistency_score=consistency_result.consistency_score,
+                trust_score=trust_decision.final_score,
+                should_execute=False,
+                validation_passed=validation_result.valid,
             )
 
         selected.ranking_score = ranked_choice.score
+        
+        # Stage 4: Final logging
+        print(f"\n{'='*70}")
+        print(f"[STAGE 4 FINAL RESULT]")
+        print(f"{'='*70}")
+        print(f"[INTENT] {selected.intent.action}")
+        print(f"[SLOTS] {selected.intent.parameters}")
+        print(f"[CONFIDENCE] {selected.intent.confidence}")
+        print(f"[CONSISTENCY] {consistency_result.consistency_score:.4f}")
+        print(f"[TRUST SCORE] {trust_decision.final_score:.4f}")
+        print(f"[SHOULD EXECUTE] {trust_decision.should_execute}")
+        print(f"[VALIDATION] {validation_result.valid}")
+        
         self._trace_block(
             "FINAL SELECTION",
             {
@@ -342,6 +506,9 @@ class DrawToActionPipeline:
                 "intent": selected.intent.action,
                 "app": selected.intent.parameters.get("app"),
                 "score": selected.ranking_score,
+                "stage4_consistency": consistency_result.consistency_score,
+                "stage4_trust": trust_decision.final_score,
+                "stage4_execute": trust_decision.should_execute,
             },
         )
         return InferenceResult(
@@ -356,6 +523,11 @@ class DrawToActionPipeline:
             message=selected.message,
             ranking_score=selected.ranking_score,
             candidates=candidates,
+            # Stage 4 metadata
+            consistency_score=consistency_result.consistency_score,
+            trust_score=trust_decision.final_score,
+            should_execute=trust_decision.should_execute,
+            validation_passed=validation_result.valid,
         )
 
     async def close(self) -> None:

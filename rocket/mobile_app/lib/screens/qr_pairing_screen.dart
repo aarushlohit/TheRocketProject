@@ -130,9 +130,9 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                             child: Container(
                               width: 24,
                               height: 24,
-                              decoration: BoxDecoration(
+                              decoration: const BoxDecoration(
                                 color: AppTheme.primary,
-                                borderRadius: const BorderRadius.only(
+                                borderRadius: BorderRadius.only(
                                   topLeft: Radius.circular(22),
                                 ),
                               ),
@@ -144,9 +144,9 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                             child: Container(
                               width: 24,
                               height: 24,
-                              decoration: BoxDecoration(
+                              decoration: const BoxDecoration(
                                 color: AppTheme.primary,
-                                borderRadius: const BorderRadius.only(
+                                borderRadius: BorderRadius.only(
                                   topRight: Radius.circular(22),
                                 ),
                               ),
@@ -158,9 +158,9 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                             child: Container(
                               width: 24,
                               height: 24,
-                              decoration: BoxDecoration(
+                              decoration: const BoxDecoration(
                                 color: AppTheme.primary,
-                                borderRadius: const BorderRadius.only(
+                                borderRadius: BorderRadius.only(
                                   bottomLeft: Radius.circular(22),
                                 ),
                               ),
@@ -172,9 +172,9 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                             child: Container(
                               width: 24,
                               height: 24,
-                              decoration: BoxDecoration(
+                              decoration: const BoxDecoration(
                                 color: AppTheme.primary,
-                                borderRadius: const BorderRadius.only(
+                                borderRadius: BorderRadius.only(
                                   bottomRight: Radius.circular(22),
                                 ),
                               ),
@@ -201,7 +201,7 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                         children: [
                           Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.qr_code_scanner_rounded,
                                 color: AppTheme.primary,
                                 size: 28,

@@ -170,15 +170,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 18),
                     decoration: AppTheme.primaryButtonDecoration,
-                    child: Row(
+                    child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.qr_code_scanner_rounded,
                           color: Colors.white,
                           size: 24,
                         ),
-                        const SizedBox(width: AppTheme.spacingM),
+                        SizedBox(width: AppTheme.spacingM),
                         Text(
                           'Scan Desktop QR',
                           style: AppTheme.buttonText,

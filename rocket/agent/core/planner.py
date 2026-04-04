@@ -184,7 +184,13 @@ class ExecutionPlanner:
     
     def plan(self, intent_data: Dict[str, Any]) -> ExecutionPlan:
         """
-        Create execution plan from intent data.
+        STAGE 4 ENHANCED: Create execution plan from intent data.
+        
+        Smart Planner Rules:
+        1. MULTI_STEP intent → execute steps sequentially
+        2. SEARCH_WEB with app context → split into MULTI_STEP (open browser + search)
+        3. Compound text patterns → auto-expand to MULTI_STEP
+        4. Single intent → wrap in plan
         
         Args:
             intent_data: Intent JSON from model or refiner
@@ -192,7 +198,9 @@ class ExecutionPlanner:
         Returns:
             ExecutionPlan with steps
         """
-        print(f"\n========== [EXECUTION PLANNER] ==========")
+        print(f"\n{'='*60}")
+        print(f"[STAGE 4 SMART PLANNER]")
+        print(f"{'='*60}")
         
         intent_type = intent_data.get("intent", "UNKNOWN")
         slots = intent_data.get("slots", {})
@@ -201,13 +209,29 @@ class ExecutionPlanner:
         print(f"[INTENT] {intent_type}")
         print(f"[SLOTS] {slots}")
         
-        # Case 1: MULTI_STEP intent
+        # =================================================================
+        # Case 1: Direct MULTI_STEP intent from model
+        # =================================================================
         if intent_type == "MULTI_STEP":
-            plan = self._plan_multi_step(slots, confidence)
-            print(f"[PLAN CREATED] {len(plan)} steps (multi-step)")
+            # Check both top-level "steps" and slots["steps"]
+            steps = intent_data.get("steps", slots.get("steps", []))
+            plan = self._plan_multi_step_from_array(steps, confidence)
+            print(f"[PLAN CREATED] {len(plan)} steps (MULTI_STEP from model)")
             return plan
         
-        # Case 2: Check for compound intents (e.g., "open X and search Y")
+        # =================================================================
+        # Case 2: Stage 4 Smart Expansion - SEARCH_WEB with browser context
+        # If the user searches and we can infer a browser, add open browser first
+        # =================================================================
+        if intent_type == "SEARCH_WEB":
+            plan = self._smart_expand_search(slots, confidence, intent_data)
+            if plan:
+                print(f"[PLAN CREATED] {len(plan)} steps (smart search expansion)")
+                return plan
+        
+        # =================================================================
+        # Case 3: Check for compound intents in normalized text
+        # =================================================================
         normalized_text = intent_data.get("normalized_text", "")
         if self._is_compound_intent(normalized_text):
             plan = self._expand_compound_intent(normalized_text, intent_data)
@@ -215,12 +239,61 @@ class ExecutionPlanner:
                 print(f"[PLAN CREATED] {len(plan)} steps (compound expanded)")
                 return plan
         
-        # Case 3: Single intent → wrap in plan
+        # =================================================================
+        # Case 4: Single intent → wrap in plan
+        # =================================================================
         plan = self._plan_single_intent(intent_type, slots, confidence, intent_data)
-        print(f"[PLAN CREATED] {len(plan)} step(s) (single/expanded)")
+        print(f"[PLAN CREATED] {len(plan)} step(s) (single)")
         
         logger.info(f"[PLANNER] Created plan with {len(plan)} steps")
         return plan
+    
+    def _smart_expand_search(
+        self,
+        slots: Dict[str, Any],
+        confidence: float,
+        original_data: Dict[str, Any],
+    ) -> Optional[ExecutionPlan]:
+        """
+        Stage 4: Smart search expansion.
+        
+        If SEARCH_WEB contains app context (e.g., "search youtube on chrome"),
+        split into MULTI_STEP: OPEN_APP + SEARCH_WEB
+        """
+        query = slots.get("query", "")
+        
+        # Check if query contains browser reference
+        browsers = ["chrome", "firefox", "edge", "safari", "brave", "browser"]
+        query_lower = query.lower()
+        
+        for browser in browsers:
+            if f"on {browser}" in query_lower or f"in {browser}" in query_lower:
+                # Extract clean query (remove browser reference)
+                clean_query = query_lower.replace(f"on {browser}", "").replace(f"in {browser}", "").strip()
+                
+                plan = ExecutionPlan()
+                
+                # Step 1: Open browser
+                plan.add_step(ExecutionStep(
+                    intent="OPEN_APP",
+                    slots={"app": browser},
+                    confidence=confidence,
+                ))
+                
+                # Step 2: Search
+                plan.add_step(ExecutionStep(
+                    intent="SEARCH_WEB",
+                    slots={"query": clean_query},
+                    confidence=confidence,
+                ))
+                
+                plan.metadata["source"] = "smart_search_expansion"
+                plan.metadata["pattern"] = "search_on_browser"
+                print(f"[SMART EXPAND] SEARCH_WEB → OPEN_APP({browser}) + SEARCH({clean_query})")
+                
+                return plan
+        
+        return None
     
     def _plan_single_intent(
         self,
@@ -248,20 +321,22 @@ class ExecutionPlanner:
         
         return plan
     
-    def _plan_multi_step(
+    def _plan_multi_step_from_array(
         self,
-        slots: Dict[str, Any],
-        confidence: float,
+        steps: List[Dict[str, Any]],
+        default_confidence: float,
     ) -> ExecutionPlan:
-        """Create plan for MULTI_STEP intent."""
+        """Create plan from MULTI_STEP steps array."""
         plan = ExecutionPlan()
         
-        steps_data = slots.get("steps", [])
+        if not steps:
+            print(f"[WARNING] MULTI_STEP has empty steps array")
+            return plan
         
-        for i, step_data in enumerate(steps_data):
+        for i, step_data in enumerate(steps):
             step_intent = step_data.get("intent", "UNKNOWN")
             step_slots = step_data.get("slots", {})
-            step_confidence = step_data.get("confidence", confidence)
+            step_confidence = step_data.get("confidence", default_confidence)
             
             step = ExecutionStep(
                 intent=step_intent,
@@ -270,11 +345,21 @@ class ExecutionPlanner:
                 index=i,
             )
             
+            print(f"[STEP {i}] {step_intent}: {step_slots}")
             plan.add_step(step)
         
         plan.metadata["source"] = "multi_step"
         
         return plan
+    
+    def _plan_multi_step(
+        self,
+        slots: Dict[str, Any],
+        confidence: float,
+    ) -> ExecutionPlan:
+        """Legacy: Create plan for MULTI_STEP intent (slots-based)."""
+        steps_data = slots.get("steps", [])
+        return self._plan_multi_step_from_array(steps_data, confidence)
     
     def _is_compound_intent(self, text: str) -> bool:
         """Check if text contains compound intent."""
