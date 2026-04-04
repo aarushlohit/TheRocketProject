@@ -28,6 +28,11 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
   bool _responded = false;
   bool _announced = false;
 
+  final List<DateTime> _confirmTapTimestamps = <DateTime>[];
+
+  static const int _requiredConfirmTaps = 3;
+  static const Duration _confirmTapWindow = Duration(seconds: 2);
+
   @override
   void initState() {
     super.initState();
@@ -44,18 +49,16 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
     _animationController.forward();
 
     _startCountdown();
-    
-    // Announce once
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_announced) {
-        _announced = true;
-        widget.socketService.tts.speak(
-          'Confirmation required. ${widget.request.action}. '
-          'Double tap confirm or cancel.',
-          priority: TtsPriority.critical,
-        );
-        widget.socketService.haptic.confirmation();
-      }
+      if (_announced) return;
+      _announced = true;
+      widget.socketService.tts.speak(
+        'Confirmation required. ${widget.request.action}. '
+        'Triple tap to confirm or cancel.',
+        priority: TtsPriority.critical,
+      );
+      widget.socketService.haptic.confirmation();
     });
   }
 
@@ -73,7 +76,6 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
         return false;
       }
 
-      // Announce at 10 and 5 seconds
       if (_remainingTime == 10 || _remainingTime == 5) {
         widget.socketService.tts.speak('${_remainingTime.toInt()} seconds');
       }
@@ -85,7 +87,10 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
   void _handleTimeout() {
     if (_responded) return;
     _responded = true;
-    widget.socketService.cancelConfirmation(widget.request.confirmationId);
+    widget.socketService.cancelConfirmation(
+      widget.request.confirmationId,
+      source: widget.request.source,
+    );
     widget.socketService.tts.speakError('Timed out. Action cancelled.');
     widget.socketService.haptic.error();
   }
@@ -94,14 +99,46 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
     if (_responded) return;
     _responded = true;
     HapticFeedback.heavyImpact();
-    widget.socketService.sendConfirmation(widget.request.confirmationId, true);
+    widget.socketService.sendConfirmation(
+      widget.request.confirmationId,
+      true,
+      source: widget.request.source,
+    );
   }
 
   void _cancel() {
     if (_responded) return;
     _responded = true;
     HapticFeedback.mediumImpact();
-    widget.socketService.sendConfirmation(widget.request.confirmationId, false);
+    widget.socketService.sendConfirmation(
+      widget.request.confirmationId,
+      false,
+      source: widget.request.source,
+    );
+  }
+
+  void _registerConfirmTap() {
+    if (_responded) return;
+
+    final now = DateTime.now();
+    _confirmTapTimestamps.removeWhere(
+      (timestamp) => now.difference(timestamp) > _confirmTapWindow,
+    );
+    _confirmTapTimestamps.add(now);
+
+    final remaining = _requiredConfirmTaps - _confirmTapTimestamps.length;
+    if (remaining <= 0) {
+      _confirmTapTimestamps.clear();
+      _confirm();
+      return;
+    }
+
+    widget.socketService.haptic.selection();
+    if (remaining == 1) {
+      widget.socketService.tts.speakOnce('One more tap to confirm');
+    } else {
+      widget.socketService.tts.speakOnce('$remaining more taps to confirm');
+    }
   }
 
   @override
@@ -127,13 +164,12 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
             child: Semantics(
               liveRegion: true,
               label: 'Confirmation required. ${widget.request.action}. '
-                  'Double tap confirm or cancel.',
+                  'Triple tap confirm or cancel.',
               child: Padding(
                 padding: const EdgeInsets.all(AppTheme.spacingL),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Warning icon
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
@@ -147,8 +183,6 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
                       ),
                     ),
                     const SizedBox(height: AppTheme.spacingXL),
-
-                    // Title
                     Text(
                       'Confirmation Required',
                       style: AppTheme.headingMedium.copyWith(
@@ -157,8 +191,6 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppTheme.spacingM),
-
-                    // Action description
                     Container(
                       padding: const EdgeInsets.all(AppTheme.spacingM),
                       decoration: BoxDecoration(
@@ -175,8 +207,6 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
                       ),
                     ),
                     const SizedBox(height: AppTheme.spacingL),
-
-                    // Timer
                     Text(
                       '${_remainingTime.toInt()} seconds',
                       style: AppTheme.headingSmall.copyWith(
@@ -186,8 +216,6 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
                       ),
                     ),
                     const SizedBox(height: AppTheme.spacingS),
-
-                    // Progress bar
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
@@ -202,11 +230,8 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
                       ),
                     ),
                     const SizedBox(height: AppTheme.spacingXL),
-
-                    // Buttons
                     Row(
                       children: [
-                        // Cancel button
                         Expanded(
                           child: Semantics(
                             button: true,
@@ -240,18 +265,12 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
                           ),
                         ),
                         const SizedBox(width: AppTheme.spacingM),
-
-                        // Confirm button
                         Expanded(
                           child: Semantics(
                             button: true,
-                            label: 'Confirm action',
+                            label: 'Confirm action with triple tap',
                             child: GestureDetector(
-                              onTap: () {
-                                widget.socketService.tts.speakOnce('Double tap to confirm');
-                                widget.socketService.haptic.selection();
-                              },
-                              onDoubleTap: _confirm,
+                              onTap: _registerConfirmTap,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 18),
                                 decoration: BoxDecoration(
@@ -278,10 +297,8 @@ class _ConfirmationOverlayState extends State<ConfirmationOverlay>
                       ],
                     ),
                     const SizedBox(height: AppTheme.spacingL),
-
-                    // Instructions
                     Text(
-                      'Double tap to confirm • Swipe to cancel',
+                      'Triple tap to confirm - Swipe to cancel',
                       style: AppTheme.bodySmall.copyWith(
                         color: Colors.white54,
                       ),

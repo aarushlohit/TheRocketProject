@@ -365,24 +365,62 @@ class ActionExecutor:
                 return Result(status="success", message=f"Renamed file to: {destination.name}")
 
             if action == "CLICK_ELEMENT":
-                target = str(params.get("target", "")).lower().strip()
-                # Semantic fallback actions for common UI targets.
-                if "search" in target:
-                    await self.platform.press_keys("ctrl+l")
-                elif "first result" in target:
-                    await self.platform.press_keys("tab")
-                    await self.platform.press_keys("enter")
-                elif "play" in target:
-                    await self.platform.press_keys("space")
-                else:
-                    await self.platform.press_keys("enter")
-                return Result(status="success", message=f"Interacted with semantic target: {target or 'default'}")
+                x_raw = params.get("x")
+                y_raw = params.get("y")
+
+                if x_raw is None or y_raw is None:
+                    return Result(
+                        status="error",
+                        message="CLICK_ELEMENT requires numeric x and y coordinates",
+                        error_code="MISSING_COORDINATES",
+                        data={"slots": params},
+                    )
+
+                try:
+                    x = int(float(x_raw))
+                    y = int(float(y_raw))
+                except (TypeError, ValueError):
+                    return Result(
+                        status="error",
+                        message="CLICK_ELEMENT coordinates must be numbers",
+                        error_code="INVALID_COORDINATES",
+                        data={"slots": params},
+                    )
+
+                button = str(params.get("button", "left")).lower().strip() or "left"
+                click_result = await self.platform.click(x, y, button=button)
+                status = click_result.get("status", "success") if isinstance(click_result, dict) else "success"
+                if status != "success":
+                    return Result(
+                        status="error",
+                        message="Failed to click element",
+                        error_code="CLICK_ELEMENT_FAILED",
+                        data=click_result if isinstance(click_result, dict) else {"x": x, "y": y, "button": button},
+                    )
+
+                return Result(
+                    status="success",
+                    message=f"Clicked at ({x}, {y})",
+                    data=click_result if isinstance(click_result, dict) else {"x": x, "y": y, "button": button},
+                )
 
             if action == "SCROLL":
                 direction = str(params.get("direction", "down")).lower()
                 amount = int(params.get("amount", 5))
-                await self.platform.scroll(direction, amount)
-                return Result(status="success", message=f"Scrolled {direction}")
+                scroll_result = await self.platform.scroll(direction, amount)
+                status = scroll_result.get("status", "success") if isinstance(scroll_result, dict) else "success"
+                if status != "success":
+                    return Result(
+                        status="error",
+                        message=f"Failed to scroll {direction}",
+                        error_code="SCROLL_FAILED",
+                        data=scroll_result if isinstance(scroll_result, dict) else {"direction": direction, "amount": amount},
+                    )
+                return Result(
+                    status="success",
+                    message=f"Scrolled {direction}",
+                    data=scroll_result if isinstance(scroll_result, dict) else {"direction": direction, "amount": amount},
+                )
 
             if action == "WAIT":
                 seconds = float(params.get("seconds", 1.0))

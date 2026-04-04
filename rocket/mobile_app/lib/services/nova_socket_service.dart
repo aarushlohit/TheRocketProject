@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../models/pairing_config.dart';
+import 'backend_api_service.dart';
 import 'tts_service.dart';
 import 'haptic_service.dart';
 
@@ -34,17 +35,39 @@ class ConfirmationRequest {
     required this.confirmationId,
     required this.action,
     required this.timeout,
+    this.source = 'websocket',
   });
 
   final String confirmationId;
   final String action;
   final double timeout;
+  final String source;
 
   factory ConfirmationRequest.fromJson(Map<String, dynamic> json) {
+    final dynamic rawId = json['confirmation_id'] ?? json['id'];
+    final dynamic rawAction = json['action'] ?? json['text'];
+
     return ConfirmationRequest(
-      confirmationId: json['confirmation_id'] as String? ?? '',
-      action: json['action'] as String? ?? 'Unknown action',
+      confirmationId: rawId?.toString() ?? '',
+      action: rawAction?.toString() ?? 'Unknown action',
       timeout: (json['timeout'] as num?)?.toDouble() ?? 30.0,
+      source: (json['source'] as String?) ?? 'websocket',
+    );
+  }
+
+  factory ConfirmationRequest.fromApiResponse(Map<String, dynamic> json) {
+    final action =
+        json['action']?.toString() ??
+        json['original_intent']?.toString() ??
+        'Dangerous action';
+
+    return ConfirmationRequest(
+      confirmationId:
+          json['confirmation_id']?.toString() ??
+          'api-${DateTime.now().millisecondsSinceEpoch}',
+      action: action,
+      timeout: (json['timeout'] as num?)?.toDouble() ?? 30.0,
+      source: 'api',
     );
   }
 }
@@ -55,10 +78,12 @@ class NovaSocketService extends ChangeNotifier {
     TtsService? ttsService,
     HapticService? hapticService,
   }) : _tts = ttsService ?? TtsService(),
-       _haptic = hapticService ?? HapticService();
+      _haptic = hapticService ?? HapticService(),
+      _api = BackendApiService();
 
   final TtsService _tts;
   final HapticService _haptic;
+  final BackendApiService _api;
 
   PairingConfig? _config;
   WebSocket? _socket;
@@ -95,6 +120,7 @@ class NovaSocketService extends ChangeNotifier {
     _shouldReconnect = false;
     await disconnect();
     _config = config;
+    _api.setBaseUrl(_config?.httpBaseUrl ?? 'http://localhost:8000');
     _lastResponse = null;
     _requiresOnboarding = false;
     _pendingConfirmation = null;
@@ -191,7 +217,22 @@ class NovaSocketService extends ChangeNotifier {
   }
 
   /// Send confirmation response
-  void sendConfirmation(String confirmationId, bool confirmed) {
+  void sendConfirmation(
+    String confirmationId,
+    bool confirmed, {
+    String source = 'websocket',
+  }) {
+    if (source == 'api') {
+      if (confirmed) {
+        unawaited(_confirmViaApi());
+      } else {
+        _pendingConfirmation = null;
+        notifyListeners();
+        _tts.speakFeedback('Cancelled');
+      }
+      return;
+    }
+
     _sendJson({
       'type': 'confirmation',
       'confirmation_id': confirmationId,
@@ -208,7 +249,14 @@ class NovaSocketService extends ChangeNotifier {
   }
 
   /// Cancel a pending confirmation
-  void cancelConfirmation(String confirmationId) {
+  void cancelConfirmation(String confirmationId, {String source = 'websocket'}) {
+    if (source == 'api') {
+      _pendingConfirmation = null;
+      notifyListeners();
+      _tts.speakFeedback('Action cancelled');
+      return;
+    }
+
     _sendJson({
       'type': 'cancel',
       'confirmation_id': confirmationId,
@@ -216,6 +264,61 @@ class NovaSocketService extends ChangeNotifier {
     _pendingConfirmation = null;
     notifyListeners();
     _tts.speakFeedback('Action cancelled');
+  }
+
+  Future<Map<String, dynamic>> processInputViaApi(String userInput) async {
+    final trimmed = userInput.trim();
+    if (trimmed.isEmpty) {
+      throw Exception('Input cannot be empty');
+    }
+
+    final response = await _api.processInput(trimmed);
+    final data = response;
+
+    if (data['intent'] == 'CONFIRMATION_REQUIRED' ||
+        data['status'] == 'confirmation_required') {
+      _pendingConfirmation = ConfirmationRequest.fromApiResponse(data);
+      _tts.speakConfirmation(
+        'Confirmation required. ${_pendingConfirmation!.action}. '
+        'Triple tap to confirm, or cancel.',
+      );
+      _haptic.confirmation();
+    } else {
+      final message = data['message']?.toString() ?? 'Action completed';
+      _tts.speakResult(message);
+      if (data['status'] == 'success') {
+        _haptic.executionVerified();
+      } else {
+        _haptic.error();
+      }
+    }
+
+    _lastResponse = data;
+    notifyListeners();
+    return data;
+  }
+
+  Future<void> _confirmViaApi() async {
+    try {
+      final data = await _api.confirmPendingAction();
+      _pendingConfirmation = null;
+      _lastResponse = data;
+
+      final status = data['status']?.toString() ?? 'unknown';
+      final message = data['message']?.toString() ?? 'Confirmation processed';
+
+      if (status == 'success') {
+        _tts.speakResult(message);
+        _haptic.executionVerified();
+      } else {
+        _tts.speakError(message);
+        _haptic.error();
+      }
+      notifyListeners();
+    } catch (error) {
+      _tts.speakError('Confirmation failed: $error');
+      _haptic.error();
+    }
   }
 
   // ============ MESSAGE HANDLING ============
@@ -340,7 +443,7 @@ class NovaSocketService extends ChangeNotifier {
     
     // Critical speech + strong haptic
     _tts.speakConfirmation(
-      'Confirmation required. ${request.action}. Double tap to confirm, or swipe to cancel.'
+      'Confirmation required. ${request.action}. Triple tap to confirm, or swipe to cancel.'
     );
     _haptic.confirmation();
     notifyListeners();
@@ -352,6 +455,17 @@ class NovaSocketService extends ChangeNotifier {
     final intent = message['intent'] as String? ?? '';
     final resultMessage = message['message'] as String? ?? '';
     final verified = message['verified'] == true;
+
+    if (status == 'confirmation_required' || intent == 'CONFIRMATION_REQUIRED') {
+      _pendingConfirmation = ConfirmationRequest.fromApiResponse(message);
+      _tts.speakConfirmation(
+        'Confirmation required. ${_pendingConfirmation!.action}. '
+        'Triple tap to confirm, or cancel.',
+      );
+      _haptic.confirmation();
+      notifyListeners();
+      return;
+    }
 
     if (status == 'success') {
       final announcement = resultMessage.isNotEmpty 
@@ -430,6 +544,7 @@ class NovaSocketService extends ChangeNotifier {
     _pingTimer?.cancel();
     _shouldReconnect = false;
     unawaited(disconnect());
+    _api.dispose();
     _tts.dispose();
     _haptic.dispose();
     super.dispose();

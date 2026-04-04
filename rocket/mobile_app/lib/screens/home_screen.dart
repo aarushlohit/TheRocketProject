@@ -41,25 +41,22 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Clear TTS cache on navigation
     widget.socketService.tts.clearSpokenCache();
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _announceAdaptiveGuidance();
     });
   }
 
-  /// Announce guidance ONCE based on user's disability profile
   void _announceAdaptiveGuidance() {
     if (_guidanceAnnounced) return;
     _guidanceAnnounced = true;
 
     final profile = widget.userProfile;
     final isPaired = widget.pairingConfig != null;
-    
+
     String guidance = 'Home screen. ';
 
-    // Connection status
     if (!isPaired) {
       guidance += 'You need to connect to a computer. ';
       guidance += 'Double tap bottom right corner for settings, then scan QR code. ';
@@ -67,7 +64,6 @@ class _HomeScreenState extends State<HomeScreen> {
       guidance += '${widget.socketService.statusLabel}. ';
     }
 
-    // Adaptive instructions based on disability
     if (profile != null) {
       if (profile.isVisuallyImpaired) {
         guidance += 'Double tap top right for drawing mode. ';
@@ -91,10 +87,9 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _selectedQuadrant = quadrant;
     });
-    
-    // Announce selection ONCE
+
     final label = switch (quadrant) {
-      HomeQuadrant.voice => 'Voice mode. Not available yet.',
+      HomeQuadrant.voice => 'Voice mode. Double tap to enter command.',
       HomeQuadrant.drawing => 'Drawing mode. Double tap to enter.',
       HomeQuadrant.braille => 'Braille mode. Not available yet.',
       HomeQuadrant.settings => 'Settings. Double tap to open.',
@@ -107,18 +102,21 @@ class _HomeScreenState extends State<HomeScreen> {
     _selectQuadrant(quadrant);
 
     switch (quadrant) {
+      case HomeQuadrant.voice:
+        await _promptVoiceCommand();
+        break;
+
       case HomeQuadrant.drawing:
-        // Clear cache before navigation
         widget.socketService.tts.clearSpokenCache();
         await Navigator.of(context).push<void>(
           MaterialPageRoute<void>(
             builder: (_) => DrawingScreen(socketService: widget.socketService),
           ),
         );
-        // Re-announce on return
         _guidanceAnnounced = false;
         widget.socketService.tts.clearSpokenCache();
-        
+        break;
+
       case HomeQuadrant.settings:
         widget.socketService.tts.clearSpokenCache();
         await Navigator.of(context).push<void>(
@@ -132,13 +130,62 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         _guidanceAnnounced = false;
         widget.socketService.tts.clearSpokenCache();
-        
-      case HomeQuadrant.voice:
+        break;
+
       case HomeQuadrant.braille:
         widget.socketService.tts.speakOnce(
           'This feature is coming soon. Please use drawing mode for now.',
         );
         widget.socketService.haptic.error();
+        break;
+    }
+  }
+
+  Future<void> _promptVoiceCommand() async {
+    final controller = TextEditingController();
+    final command = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Voice Command (Text Fallback)'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              hintText: 'Type a command, e.g. open chrome',
+            ),
+            onSubmitted: (value) => Navigator.of(context).pop(value),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text('Send'),
+            ),
+          ],
+        );
+      },
+    );
+
+    final text = command?.trim() ?? '';
+    if (text.isEmpty) {
+      widget.socketService.tts.speakOnce('No command entered.');
+      widget.socketService.haptic.tap();
+      return;
+    }
+
+    widget.socketService.haptic.executionStart();
+    widget.socketService.tts.speakFeedback('Processing command');
+
+    try {
+      await widget.socketService.processInputViaApi(text);
+    } catch (error) {
+      widget.socketService.tts.speakError('Command failed: $error');
+      widget.socketService.haptic.error();
     }
   }
 
@@ -149,10 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Connection status bar
             _buildStatusBar(),
-            
-            // Main grid
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(AppTheme.spacingS),
@@ -164,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: QuadrantTile(
                               title: 'Voice',
-                              subtitle: 'Coming soon',
+                              subtitle: 'Text command API',
                               icon: Icons.mic_none_rounded,
                               backgroundColor: AppTheme.cardVoice,
                               active: _selectedQuadrant == HomeQuadrant.voice,
@@ -232,9 +276,9 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context, _) {
         final connected = widget.socketService.status == NovaConnectionStatus.connected;
         final isPaired = widget.pairingConfig != null;
-        
+
         return Semantics(
-          label: isPaired 
+          label: isPaired
               ? 'Connection status: ${widget.socketService.statusLabel}'
               : 'Not connected. Go to settings to scan QR code.',
           child: Container(
@@ -275,9 +319,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(width: AppTheme.spacingS),
                 Text(
-                  isPaired
-                      ? widget.socketService.statusLabel
-                      : 'Not connected',
+                  isPaired ? widget.socketService.statusLabel : 'Not connected',
                   style: AppTheme.bodySmall.copyWith(
                     color: connected
                         ? AppTheme.success

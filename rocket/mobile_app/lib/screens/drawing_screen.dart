@@ -222,11 +222,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
                   ),
 
                   // Clear button
-                  _buildIconButton(
-                    icon: Icons.clear_rounded,
-                    label: 'Clear canvas',
-                    onTap: _clearCanvas,
-                  ),
+                 
                 ],
               ),
             ),
@@ -256,28 +252,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
                   ),
                 ),
               ),
-
-            // Bottom instruction
-            Positioned(
-              bottom: AppTheme.spacingL,
-              left: AppTheme.spacingL,
-              right: AppTheme.spacingL,
-              child: Semantics(
-                label: 'Double tap to send drawing',
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppTheme.spacingL,
-                    vertical: 14,
-                  ),
-                  decoration: AppTheme.primaryButtonDecoration,
-                  child: const Text(
-                    'Double tap to send',
-                    textAlign: TextAlign.center,
-                    style: AppTheme.buttonText,
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
       ),

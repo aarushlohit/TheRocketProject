@@ -168,8 +168,10 @@ async def handle_message(
         
         # Process through agent
         response = await agent.handle_drawing_image(message, ws_callback)
-        
-        # Response is sent by execution engine via ws_callback
+
+        # Always forward direct agent response (confirmation/error/final result).
+        if isinstance(response, dict):
+            await state.send(response)
         return
     
     # ==========================================================================
@@ -243,22 +245,26 @@ async def handle_message(
         
         # Route to confirmation manager
         confirmation_mgr = get_confirmation_manager()
+        handled = False
         if confirmation_mgr:
             handled = confirmation_mgr.handle_response(confirmation_id, confirmed)
-            if not handled:
-                await state.send({
-                    "type": "error",
-                    "message": "Confirmation expired or invalid",
-                })
-        else:
-            # Also check agent's engine
-            if hasattr(agent, 'engine'):
-                handled = agent.engine.handle_confirmation_response(confirmation_id, confirmed)
-                if not handled:
-                    await state.send({
-                        "type": "error",
-                        "message": "Confirmation expired or invalid",
-                    })
+
+        # Fallback to agent-managed pending confirmation state.
+        if not handled and hasattr(agent, "handle_confirmation_response"):
+            agent_response = await agent.handle_confirmation_response(confirmation_id, confirmed)
+            if isinstance(agent_response, dict):
+                await state.send(agent_response)
+                handled = True
+
+        # Backward compatibility: legacy engine confirmation handling.
+        if not handled and hasattr(agent, "engine"):
+            handled = agent.engine.handle_confirmation_response(confirmation_id, confirmed)
+
+        if not handled:
+            await state.send({
+                "type": "error",
+                "message": "Confirmation expired or invalid",
+            })
         return
     
     # --------------------------------------------------------------------------
@@ -319,6 +325,10 @@ async def handle_message(
                 "type": "error",
                 "message": "Drawing requires 'url' or 'data' field",
             })
+            return
+
+        if isinstance(response, dict):
+            await state.send(response)
         return
     
     # --------------------------------------------------------------------------

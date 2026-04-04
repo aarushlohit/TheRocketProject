@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from agent.core.nova_stage0 import NovaStageZeroAgent
+from agent.server.http_api import start_http_server, stop_http_server
 from agent.server.websocket_handler import start_websocket_server
 from agent.stage0.pairing import PairingManager
 from agent.stage0.pipeline import validate_api_key
@@ -51,6 +52,12 @@ async def main():
         help="WebSocket server port (default: 8765)",
     )
     parser.add_argument(
+        "--http-port",
+        type=int,
+        default=8000,
+        help="HTTP API server port (default: 8000)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -76,6 +83,7 @@ async def main():
     validate_api_key(api_key)
 
     agent = None
+    http_server = None
 
     try:
         config = load_config(args.config)
@@ -91,6 +99,11 @@ async def main():
         agent = NovaStageZeroAgent(config=config, api_key=api_key)
         logger.info("Nova Stage 0 backend ready")
 
+        http_server = start_http_server(
+            host=args.host,
+            port=args.http_port,
+        )
+
         await start_websocket_server(
             agent=agent,
             token=payload.token,
@@ -105,6 +118,7 @@ async def main():
         logger.exception(f"Fatal error: {e}")
         sys.exit(1)
     finally:
+        stop_http_server(http_server)
         if agent is not None:
             await agent.close()
 

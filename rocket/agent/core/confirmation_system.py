@@ -127,6 +127,7 @@ class ConfirmationManager:
         ws_message = {
             "type": "confirmation_request",
             "id": confirmation_id,
+            "confirmation_id": confirmation_id,
             "text": f"Confirm: {action}?",
             "action": action,
             "timeout": timeout,

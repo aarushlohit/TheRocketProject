@@ -9,6 +9,7 @@ PATCHED VERSION:
 
 from __future__ import annotations
 
+import uuid
 from pprint import pformat
 from typing import Any, Callable, Optional
 
@@ -66,6 +67,7 @@ class NovaStageZeroAgent:
             user_profile=self.user_profile,
             websocket_callback=None,
         )
+        self._pending_actions: dict[str, dict[str, Any]] = {}
         
         logger.info("Nova Stage 0 agent initialized (UNIFIED with IntelligentPipeline)")
 
@@ -123,22 +125,11 @@ class NovaStageZeroAgent:
                 getattr(self, "user_profile", None),
             )
             if safety_intercept is not None:
-                payload = {
-                    "type": "result",
-                    "status": "blocked",
-                    "intent": safety_intercept["intent"],
-                    "message": "Dangerous operation requires confirmation",
-                    "normalized_text": inference.normalized_text,
-                    "confidence": safety_intercept.get("confidence", 1.0),
-                    "model": inference.model,
-                    "slots": safety_intercept.get("slots", {}),
-                    "reason": safety_intercept.get("reason"),
-                    "original_intent": safety_intercept.get("original_intent"),
-                    "confirmation_mode": safety_intercept.get("confirmation_mode"),
-                    "confirmation_modes": safety_intercept.get("confirmation_modes", []),
-                    "accessibility": safety_intercept.get("accessibility", {}),
-                    "verified": False,
-                }
+                payload = self._build_confirmation_request(
+                    confirmation_payload=safety_intercept,
+                    normalized_text=inference.normalized_text,
+                    model=inference.model,
+                )
                 self._trace_block(
                     "FINAL RESULT",
                     {"status": payload["status"], "message": payload["message"]},
@@ -159,7 +150,7 @@ class NovaStageZeroAgent:
                 else:
                     payload = {
                         "type": "result",
-                        "status": "error",
+                        "status": "blocked",
                         "intent": "UNKNOWN",
                         "message": inference.message or "Could not determine intent",
                         "normalized_text": inference.normalized_text,
@@ -199,22 +190,11 @@ class NovaStageZeroAgent:
                 getattr(self, "user_profile", None),
             )
             if type_text_override is not None:
-                payload = {
-                    "type": "result",
-                    "status": "error",
-                    "intent": type_text_override.get("intent", "CONFIRMATION_REQUIRED"),
-                    "message": "Dangerous TYPE_TEXT requires confirmation",
-                    "normalized_text": inference.normalized_text,
-                    "confidence": type_text_override.get("confidence", 1.0),
-                    "model": inference.model,
-                    "slots": type_text_override.get("slots", {}),
-                    "reason": type_text_override.get("reason", "dangerous_operation"),
-                    "original_intent": type_text_override.get("original_intent"),
-                    "confirmation_mode": type_text_override.get("confirmation_mode"),
-                    "confirmation_modes": type_text_override.get("confirmation_modes", []),
-                    "accessibility": type_text_override.get("accessibility", {}),
-                    "verified": False,
-                }
+                payload = self._build_confirmation_request(
+                    confirmation_payload=type_text_override,
+                    normalized_text=inference.normalized_text,
+                    model=inference.model,
+                )
                 self._trace_block(
                     "FINAL RESULT",
                     {"status": payload["status"], "message": payload["message"]},
@@ -341,22 +321,11 @@ class NovaStageZeroAgent:
                 getattr(self, "user_profile", None),
             )
             if safety_intercept is not None:
-                return {
-                    "type": "result",
-                    "status": "error",
-                    "intent": safety_intercept["intent"],
-                    "message": "Dangerous operation requires confirmation",
-                    "normalized_text": inference.normalized_text,
-                    "confidence": safety_intercept.get("confidence", 1.0),
-                    "model": inference.model,
-                    "slots": safety_intercept.get("slots", {}),
-                    "reason": safety_intercept.get("reason"),
-                    "original_intent": safety_intercept.get("original_intent"),
-                    "confirmation_mode": safety_intercept.get("confirmation_mode"),
-                    "confirmation_modes": safety_intercept.get("confirmation_modes", []),
-                    "accessibility": safety_intercept.get("accessibility", {}),
-                    "verified": False,
-                }
+                return self._build_confirmation_request(
+                    confirmation_payload=safety_intercept,
+                    normalized_text=inference.normalized_text,
+                    model=inference.model,
+                )
 
             result = await self.executor.execute(inference.intent)
             self._update_context(inference.intent.action, inference.intent.parameters, result)
@@ -376,6 +345,77 @@ class NovaStageZeroAgent:
                 "intent": None,
                 "message": f"Execution failed: {exc}",
             }
+
+    async def handle_confirmation_response(
+        self,
+        confirmation_id: str,
+        confirmed: bool,
+    ) -> Optional[dict]:
+        """Handle confirmation responses for pending actions generated by this agent."""
+        pending = self._pending_actions.pop(confirmation_id, None)
+        if pending is None:
+            return None
+
+        if not confirmed:
+            return {
+                "type": "result",
+                "status": "cancelled",
+                "intent": pending.get("intent", "UNKNOWN"),
+                "message": "Action cancelled by user",
+                "normalized_text": pending.get("normalized_text", ""),
+                "confidence": 1.0,
+                "model": pending.get("model", "confirmation"),
+                "slots": pending.get("slots", {}),
+                "verified": False,
+            }
+
+        intent_name = str(pending.get("intent") or "UNKNOWN")
+        slots = pending.get("slots", {})
+        normalized_text = str(pending.get("normalized_text") or "")
+        model = str(pending.get("model") or "confirmation")
+
+        intent = Intent(
+            action=intent_name,
+            parameters=slots if isinstance(slots, dict) else {},
+            confidence=1.0,
+            metadata={"confirmed": True},
+        )
+
+        result = await self.executor.execute(intent)
+        if (
+            isinstance(result, Result)
+            and result.status == "error"
+            and result.error_code == "UNSUPPORTED_INTENT"
+            and hasattr(self, "pipeline_engine")
+            and self.pipeline_engine is not None
+        ):
+            pipeline_result = await self.pipeline_engine.process(
+                {
+                    "intent": intent_name,
+                    "slots": slots if isinstance(slots, dict) else {},
+                    "confidence": 1.0,
+                    "normalized_text": normalized_text,
+                    "_model_used": model,
+                }
+            )
+            return self._build_mobile_response(
+                result=pipeline_result,
+                intent_name=intent_name,
+                normalized_text=normalized_text,
+                confidence=1.0,
+                model=model,
+                slots=slots if isinstance(slots, dict) else {},
+            )
+
+        self._update_context(intent_name, slots if isinstance(slots, dict) else {}, result)
+        return self._build_mobile_response(
+            result=result,
+            intent_name=intent_name,
+            normalized_text=normalized_text,
+            confidence=1.0,
+            model=model,
+            slots=slots if isinstance(slots, dict) else {},
+        )
 
     async def close(self) -> None:
         await self.pipeline.close()
@@ -475,6 +515,55 @@ class NovaStageZeroAgent:
         app_name = slots.get("app")
         if isinstance(app_name, str) and app_name:
             self.last_opened_app = app_name
+
+    def _build_confirmation_request(
+        self,
+        *,
+        confirmation_payload: dict,
+        normalized_text: str,
+        model: str,
+    ) -> dict:
+        """Build a confirmation_request payload and persist pending action."""
+        original_intent = (
+            confirmation_payload.get("original_intent")
+            or confirmation_payload.get("slots", {}).get("original_intent")
+            or "UNKNOWN"
+        )
+        original_slots = confirmation_payload.get("slots", {}).get("original_slots", {})
+        if not isinstance(original_slots, dict):
+            original_slots = {}
+
+        confirmation_id = str(uuid.uuid4())[:8]
+        self._pending_actions[confirmation_id] = {
+            "intent": original_intent,
+            "slots": original_slots,
+            "normalized_text": normalized_text,
+            "model": model,
+        }
+
+        action_preview = original_intent
+        if original_slots:
+            action_preview = f"{original_intent} {original_slots}"
+
+        return {
+            "type": "confirmation_request",
+            "status": "confirmation_required",
+            "intent": "CONFIRMATION_REQUIRED",
+            "message": "Dangerous operation requires confirmation",
+            "confirmation_id": confirmation_id,
+            "action": action_preview,
+            "timeout": 30.0,
+            "normalized_text": normalized_text,
+            "confidence": confirmation_payload.get("confidence", 1.0),
+            "model": model,
+            "slots": confirmation_payload.get("slots", {}),
+            "reason": confirmation_payload.get("reason", "dangerous_operation"),
+            "original_intent": original_intent,
+            "confirmation_mode": confirmation_payload.get("confirmation_mode"),
+            "confirmation_modes": confirmation_payload.get("confirmation_modes", []),
+            "accessibility": confirmation_payload.get("accessibility", {}),
+            "verified": False,
+        }
 
     def _trace_block(self, section: str, payload) -> None:
         """Print trace block if trace mode enabled."""
