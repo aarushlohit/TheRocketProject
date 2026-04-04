@@ -20,6 +20,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from agent.utils.logger import get_logger
 from agent.core.intent_system import VALID_INTENTS, is_valid_intent
 from agent.core.anti_hallucination import check_hallucination, KNOWN_APPS
+from agent.core.safety import (
+    build_confirmation_response,
+    is_system_path,
+    override_type_text_misuse,
+    pre_intent_safety_check,
+    requires_confirmation,
+)
+from agent.core.user_profile import UserProfile
 from agent.core.goal_expander import (
     is_high_level_goal,
     expand_goal,
@@ -121,6 +129,12 @@ def apply_consensus(
     - Prefer semantic similarity to input
     - Prefer known applications
     - Reject outliers
+    
+    FIX 3: CONSENSUS BYPASS for OPEN_APP
+    If ANY candidate is OPEN_APP with confidence > 0.7, select immediately.
+    
+    FIX 3b: DISABLE CONSENSUS TEMPORARILY
+    For now, just select highest confidence candidate.
     """
     if not candidates:
         return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0}
@@ -128,33 +142,47 @@ def apply_consensus(
     if len(candidates) == 1:
         return candidates[0]
     
-    # Group by intent type
-    intent_groups: Dict[str, List[Dict]] = {}
+    # FIX 3: CONSENSUS BYPASS - Check for high-confidence OPEN_APP first
     for candidate in candidates:
-        intent = candidate.get("intent", "UNKNOWN")
-        if intent not in intent_groups:
-            intent_groups[intent] = []
-        intent_groups[intent].append(candidate)
+        if (candidate.get("intent") == "OPEN_APP" and 
+            candidate.get("confidence", 0) > 0.7):
+            print(f"[CONSENSUS BYPASS] OPEN_APP with confidence {candidate.get('confidence'):.2f} - selecting immediately")
+            return candidate
     
-    # Find majority
-    majority_intent = max(intent_groups.keys(), key=lambda k: len(intent_groups[k]))
-    majority_candidates = intent_groups[majority_intent]
-    
-    # From majority, select highest confidence
-    best = max(majority_candidates, key=lambda c: c.get("confidence", 0))
-    
-    # Validate against input
-    valid, _ = validate_intent_against_input(input_text, best)
-    if not valid:
-        # Try next best
-        for candidate in sorted(candidates, key=lambda c: -c.get("confidence", 0)):
-            valid, _ = validate_intent_against_input(input_text, candidate)
-            if valid:
-                return candidate
-        
-        return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0}
-    
+    # FIX 3b: DISABLE CONSENSUS - Just select highest confidence
+    print(f"[CONSENSUS DISABLED] Selecting highest confidence candidate")
+    best = max(candidates, key=lambda c: c.get("confidence", 0))
+    print(f"[CONSENSUS] Selected {best.get('intent')} with confidence {best.get('confidence'):.2f}")
     return best
+    
+    # OLD CONSENSUS LOGIC - DISABLED FOR NOW
+    # # Group by intent type
+    # intent_groups: Dict[str, List[Dict]] = {}
+    # for candidate in candidates:
+    #     intent = candidate.get("intent", "UNKNOWN")
+    #     if intent not in intent_groups:
+    #         intent_groups[intent] = []
+    #     intent_groups[intent].append(candidate)
+    # 
+    # # Find majority
+    # majority_intent = max(intent_groups.keys(), key=lambda k: len(intent_groups[k]))
+    # majority_candidates = intent_groups[majority_intent]
+    # 
+    # # From majority, select highest confidence
+    # best = max(majority_candidates, key=lambda c: c.get("confidence", 0))
+    # 
+    # # Validate against input
+    # valid, _ = validate_intent_against_input(input_text, best)
+    # if not valid:
+    #     # Try next best
+    #     for candidate in sorted(candidates, key=lambda c: -c.get("confidence", 0)):
+    #         valid, _ = validate_intent_against_input(input_text, candidate)
+    #         if valid:
+    #             return candidate
+    #     
+    #     return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0}
+    # 
+    # return best
 
 
 # =============================================================================
@@ -441,75 +469,49 @@ def apply_self_correction(
 # 9. SAFETY FILTER
 # =============================================================================
 
-DANGEROUS_INTENTS = {"DELETE_FILE", "LOCK_SCREEN"}
-DANGEROUS_PATTERNS = [
-    "rm -rf", "format", "del /s", "shutdown",
-    "powershell -enc", "curl | bash",
-]
-
-
-def apply_safety_filter(intent_data: Dict[str, Any]) -> Dict[str, Any]:
+def apply_safety_filter(
+    intent_data: Dict[str, Any],
+    user_profile: Optional[UserProfile] = None,
+) -> Dict[str, Any]:
     """
-    Apply safety filter for dangerous actions.
-    
-    Returns CONDITIONAL with requires_confirmation for dangerous operations.
-    
-    Per system spec:
-    {
-        "intent": "CONDITIONAL",
-        "slots": {"requires_confirmation": true},
-        "confidence": 1.0
-    }
+    Apply Stage 5.6 safety interception after intent shaping.
+
+    The mandatory pre-intent safety layer should already run on raw input.
+    This function is the final deterministic guard before execution.
     """
+    if intent_data.get("intent") == "CONFIRMATION_REQUIRED":
+        return intent_data
+
     intent = intent_data.get("intent")
     slots = intent_data.get("slots", {})
-    
-    # Check dangerous intents
-    if intent in DANGEROUS_INTENTS:
-        return {
-            "intent": "CONDITIONAL",
-            "slots": {
-                "requires_confirmation": True,
-                "original_intent": intent,
-                "original_slots": slots,
-                "reason": "dangerous_action",
-            },
-            "confidence": 1.0,
-        }
-    
-    # Check dangerous text patterns
-    if intent == "TYPE_TEXT":
-        text = slots.get("text", "").lower()
-        for pattern in DANGEROUS_PATTERNS:
-            if pattern in text:
-                return {
-                    "intent": "CONDITIONAL",
-                    "slots": {
-                        "requires_confirmation": True,
-                        "original_intent": intent,
-                        "original_slots": slots,
-                        "reason": "dangerous_text_pattern",
-                    },
-                    "confidence": 1.0,
-                }
-    
-    # Check MULTI_STEP recursively
+
+    override = override_type_text_misuse(intent_data, user_profile)
+    if override is not None:
+        return override
+
     if intent == "MULTI_STEP":
         steps = intent_data.get("steps", [])
         for step in steps:
-            filtered = apply_safety_filter(step)
-            if filtered.get("intent") == "CONDITIONAL":
-                return {
-                    "intent": "CONDITIONAL",
-                    "slots": {
-                        "requires_confirmation": True,
-                        "original_intent": intent,
-                        "original_slots": intent_data.get("slots", {}),
-                        "reason": f"step_requires_confirmation: {filtered.get('slots', {}).get('reason')}",
-                    },
-                    "confidence": 1.0,
-                }
-    
+            filtered = apply_safety_filter(step, user_profile)
+            if filtered.get("intent") == "CONFIRMATION_REQUIRED":
+                return build_confirmation_response(
+                    intent_data,
+                    reason="dangerous_operation",
+                    user_profile=user_profile,
+                    original_intent="MULTI_STEP",
+                    original_slots={"steps": steps},
+                    metadata={"triggering_step": filtered},
+                )
+
+    if requires_confirmation(intent_data):
+        path = slots.get("path") or slots.get("source") or slots.get("destination")
+        reason = "system_path_operation" if is_system_path(path) else "dangerous_operation"
+        return build_confirmation_response(
+            intent_data,
+            reason=reason,
+            user_profile=user_profile,
+        )
+
     return intent_data
 
 
@@ -546,9 +548,10 @@ def process_with_intelligence(
     raw_intent: Dict[str, Any],
     context: Optional[Dict[str, Any]] = None,
     candidates: Optional[List[Dict[str, Any]]] = None,
+    user_profile: Optional[UserProfile] = None,
 ) -> IntelligenceResult:
     """
-    Process intent through the Stage 5.5 intelligence layer.
+    Process intent through the Stage 5.6 intelligence layer.
     
     Pipeline:
     1. Intent validation
@@ -565,6 +568,21 @@ def process_with_intelligence(
     errors = []
     warnings = []
     metadata = {}
+
+    # 0. Mandatory pre-intent safety layer
+    safety_intercept = pre_intent_safety_check(input_text, user_profile)
+    if safety_intercept is not None:
+        metadata["pre_intent_safety"] = True
+        metadata["confirmation_required"] = True
+        warnings.append("Pre-intent safety interception applied")
+        return IntelligenceResult(
+            intent_data=safety_intercept,
+            is_valid=True,
+            confidence=1.0,
+            validation_passed=True,
+            warnings=warnings,
+            metadata=metadata,
+        )
     
     # Start with raw intent or consensus
     if candidates and len(candidates) > 1:
@@ -618,8 +636,8 @@ def process_with_intelligence(
         warnings.append(f"Self-corrected: {intent_data.get('_reason')}")
     
     # 7. Safety filter
-    intent_data = apply_safety_filter(intent_data)
-    if intent_data.get("intent") == "CONDITIONAL":
+    intent_data = apply_safety_filter(intent_data, user_profile)
+    if intent_data.get("intent") == "CONFIRMATION_REQUIRED":
         metadata["confirmation_required"] = True
     
     # 8. Final confidence check

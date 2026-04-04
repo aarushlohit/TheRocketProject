@@ -280,6 +280,24 @@ async def handle_message(
         return
     
     # --------------------------------------------------------------------------
+    # TEXT: Plain text command input
+    # --------------------------------------------------------------------------
+    if msg_type == "text":
+        text_value = str(data.get("text", "")).strip()
+        if not text_value:
+            await state.send(
+                {
+                    "type": "error",
+                    "message": "Text command requires non-empty 'text' field",
+                }
+            )
+            return
+
+        response = await agent.handle_text_input(text_value, ws_callback)
+        await state.send(response)
+        return
+
+    # --------------------------------------------------------------------------
     # DRAWING (JSON): Drawing URL (alternative to binary)
     # --------------------------------------------------------------------------
     if msg_type == "drawing":

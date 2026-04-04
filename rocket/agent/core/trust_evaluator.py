@@ -108,6 +108,7 @@ class TrustEvaluator:
         consistency_score: float,
         validation_passed: bool,
         validation_warnings: int = 0,
+        intent: Optional[str] = None,
     ) -> TrustDecision:
         """
         Evaluate execution trust.
@@ -163,6 +164,20 @@ class TrustEvaluator:
         # =================================================================
         # DETERMINE EXECUTION DECISION
         # =================================================================
+        
+        # FIX 4: TRUST OVERRIDE for OPEN_APP
+        # If OPEN_APP with confidence > 0.7, execute regardless of trust score
+        if intent == "OPEN_APP" and confidence_score > 0.7:
+            print(f"\n[TRUST OVERRIDE] OPEN_APP with confidence {confidence_score:.2f} > 0.7 - bypassing trust score")
+            return TrustDecision(
+                should_execute=True,
+                final_score=final_score,
+                confidence_score=confidence_score,
+                consistency_score=consistency_normalized,
+                validation_score=validation_score,
+                reason=f"OPEN_APP trust override - confidence {confidence_score:.2f} > 0.7",
+                recommendations=[],
+            )
         
         should_execute = True
         reason = "All checks passed"
@@ -242,6 +257,7 @@ def evaluate_trust(
     consistency_score: float,
     validation_passed: bool,
     validation_warnings: int = 0,
+    intent: Optional[str] = None,
 ) -> TrustDecision:
     """
     Convenience function to evaluate execution trust.
@@ -251,6 +267,7 @@ def evaluate_trust(
         consistency_score: Multi-variant consistency
         validation_passed: JSON validation result
         validation_warnings: Number of warnings
+        intent: Intent type (for OPEN_APP override)
         
     Returns:
         TrustDecision
@@ -260,4 +277,5 @@ def evaluate_trust(
         consistency_score=consistency_score,
         validation_passed=validation_passed,
         validation_warnings=validation_warnings,
+        intent=intent,
     )

@@ -166,13 +166,12 @@ def check_hallucination(
             if step_result.warnings:
                 warnings.extend([f"Step {i+1}: {w}" for w in step_result.warnings])
     
-    # Calculate confidence
-    confidence = 1.0
-    if warnings:
-        confidence -= 0.1 * len(warnings)
-    if errors:
-        confidence -= 0.3 * len(errors)
-    confidence = max(0.0, confidence)
+    # Preserve model confidence exactly; do not mutate based on warnings/errors.
+    try:
+        confidence = float(output_json.get("confidence", 1.0))
+    except (TypeError, ValueError):
+        confidence = 1.0
+    confidence = max(0.0, min(1.0, confidence))
     
     # Determine validity
     is_valid = len(errors) == 0

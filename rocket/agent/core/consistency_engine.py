@@ -124,10 +124,32 @@ class ConsistencyEngine:
             
         Returns:
             ConsistencyResult with selected intent and scores
+            
+        FIX 3c: OPEN_APP BYPASS in consistency engine
         """
         print(f"\n{'='*60}")
         print(f"[CONSISTENCY ENGINE] Analyzing {len(candidates)} candidates")
         print(f"{'='*60}")
+        
+        # FIX 3c: OPEN_APP BYPASS - Check for high-confidence OPEN_APP first
+        for candidate in candidates:
+            if (candidate and 
+                candidate.get("intent") == "OPEN_APP" and 
+                candidate.get("confidence", 0) > 0.7):
+                print(f"\n{'='*60}")
+                print(f"[CONSISTENCY BYPASS] OPEN_APP with confidence {candidate.get('confidence'):.2f}")
+                print(f"[CONSISTENCY BYPASS] Skipping consistency analysis")
+                print(f"{'='*60}")
+                
+                return ConsistencyResult(
+                    selected_intent=candidate,
+                    consistency_score=1.0,
+                    confidence=candidate.get("confidence", 0.9),
+                    agreement_ratio=1.0,
+                    final_score=1.0,
+                    voting_breakdown={"OPEN_APP": len(candidates)},
+                    all_candidates=candidates,
+                )
         
         # Filter out invalid candidates
         valid_candidates = [

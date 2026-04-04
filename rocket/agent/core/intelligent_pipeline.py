@@ -234,6 +234,16 @@ class IntelligentPipeline:
                 return self._error_result(error_msg, start_time, original_intent)
             
             intent_type = intent_data.get("intent", "UNKNOWN")
+            if intent_type == "CONFIRMATION_REQUIRED":
+                message = intent_data.get("reason", "dangerous_operation")
+                self.feedback.send_warning("Confirmation required before execution")
+                return PipelineResult(
+                    status="blocked",
+                    message=f"Confirmation required: {message}",
+                    original_intent=original_intent,
+                    refined_intent=intent_data,
+                    execution_time=time.time() - start_time,
+                )
             if intent_type == "UNKNOWN":
                 self.feedback.send_warning("Could not understand command")
                 return self._error_result("Unknown intent", start_time, original_intent)

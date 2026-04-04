@@ -123,19 +123,26 @@ def test_extract_app_name_without_second_word():
 
 
 def test_parse_intent_open_app():
-    assert parse_intent("open chrome") == {"intent": "OPEN_APP", "app": "chrome"}
+    parsed = parse_intent("open chrome")
+    assert parsed["intent"] == "OPEN_APP"
+    assert parsed["slots"] == {"app": "chrome"}
+    assert parsed["normalized_text"] == "open chrome"
 
 
 def test_parse_intent_close():
-    assert parse_intent("close window") == {"intent": "CLOSE_APP"}
+    parsed = parse_intent("close window")
+    assert parsed["intent"] == "CLOSE_APP"
+    assert parsed["slots"] == {"app": "window"}
 
 
 def test_parse_intent_screenshot():
-    assert parse_intent("take screenshot now") == {"intent": "SCREENSHOT"}
+    parsed = parse_intent("take screenshot now")
+    assert parsed["intent"] == "SCREENSHOT"
 
 
 def test_parse_intent_unknown():
-    assert parse_intent("hello world") == {"intent": "UNKNOWN"}
+    parsed = parse_intent("hello world")
+    assert parsed["intent"] == "UNKNOWN"
 
 
 def test_process_drawing_uses_ocr_text_for_intent(monkeypatch, tmp_path):
@@ -181,8 +188,8 @@ def test_process_drawing_returns_unknown_for_unmatched_app(monkeypatch, tmp_path
 
     result = asyncio.run(pipeline.process_drawing(_png_bytes()))
 
-    assert result.intent.action == "UNKNOWN"
-    assert result.message == "Could not determine intent"
+    assert result.intent.action == "OPEN_APP"
+    assert result.intent.parameters == {"app": "splunk"}
 
 
 def test_validate_api_key_success(monkeypatch):

@@ -408,6 +408,7 @@ def correct_app(app: str | None) -> str | None:
     if alias_match:
         return canonicalize_app_name(TEXT_APP_MAP[alias_match[0]])
 
+    # Preserve original app token instead of nullifying valid user intent.
     return app
 
 

@@ -15,6 +15,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+def pytest_configure(config):
+    """Register local markers used by the suite."""
+    config.addinivalue_line("markers", "asyncio: run test in an event loop")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    """Run async tests without requiring pytest-asyncio."""
+    test_function = pyfuncitem.obj
+
+    if not asyncio.iscoroutinefunction(test_function):
+        return None
+
+    kwargs = {
+        arg_name: pyfuncitem.funcargs[arg_name]
+        for arg_name in pyfuncitem._fixtureinfo.argnames
+    }
+    asyncio.run(test_function(**kwargs))
+    return True
+
+
 # =============================================================================
 # FIXTURES - SAMPLE DATA
 # =============================================================================

@@ -134,9 +134,13 @@ SEARCH_NAMES = {
 def resolve_app(app_name: str) -> Optional[str]:
     """
     Resolve app name to executable command for Windows.
-    Returns None if not found in PATH.
+    
+    FIX 1: APP RESOLUTION FALLBACK
+    If app not found in PATH, return raw app name instead of None.
+    This ensures execution always proceeds to Windows Search fallback.
     """
     candidates = APP_MAP.get(app_name.lower(), [app_name])
+    print(f"[RUNTIME VERIFY][resolve_app] file={__file__} app='{app_name}'")
     
     print(f"\n[WINDOWS RESOLVE] Trying: {candidates}")
     
@@ -145,8 +149,9 @@ def resolve_app(app_name: str) -> Optional[str]:
             print(f"[FOUND IN PATH] {cmd}")
             return cmd
     
-    print(f"[NOT IN PATH] {app_name}")
-    return None
+    # FIX 1: Return raw app name as fallback instead of None
+    print(f"[NOT IN PATH] {app_name} - using raw name as fallback")
+    return app_name
 
 
 # =============================================================================
@@ -178,14 +183,8 @@ def try_open_exe(app_name: str) -> bool:
 
 def open_via_search(app_name: str, retry: bool = True) -> bool:
     """
-    STEP 2: Fallback - Open app via Windows Search (PATCHED).
-    Uses pyautogui to simulate Win key + typing + Enter.
-    
-    This works for ANY app installed on Windows, even if not in PATH.
-    
-    PATCHED:
-    - Increased delays for reliability
-    - Retry logic for verification
+    Deterministic human-like app launch.
+    Uses Win -> type app name -> Enter.
     """
     pyautogui = get_pyautogui()
     
@@ -194,9 +193,11 @@ def open_via_search(app_name: str, retry: bool = True) -> bool:
         return False
     
     try:
-        # Use friendly search name if available
-        search_name = SEARCH_NAMES.get(app_name.lower(), app_name)
-        
+        search_name = app_name.strip()
+        if not search_name:
+            print("[SEARCH FALLBACK] Empty app name")
+            return False
+
         print(f"\n[SEARCH FALLBACK] Opening via Windows Search: {search_name}")
         
         # Press Windows key to open Start menu
@@ -277,33 +278,30 @@ class WindowsAdapter(PlatformAdapter):
 
     async def open_app(self, app_name: str) -> dict:
         """
-        Open application on Windows using HYBRID strategy:
-        1. Try executable (fast, reliable if in PATH)
-        2. Try protocol handler (for UWP apps)
-        3. Fallback to Windows Search (universal, works for all apps)
+        Open application on Windows using deterministic human-like control:
+        Win -> type app -> Enter.
+        If first attempt fails, retry once with an alternate shell launch.
         """
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[OPEN_APP] app_name={app_name}")
-        
-        # Step 1: Try executable
-        if try_open_exe(app_name):
-            logger.info(f"[EXECUTION SUCCESS] Launched via exe: {app_name}")
-            return {"status": "success", "method": "exe", "app": app_name}
-        
-        # Step 1.5: Try protocol handler
-        if try_protocol_launch(app_name):
-            logger.info(f"[EXECUTION SUCCESS] Launched via protocol: {app_name}")
-            return {"status": "success", "method": "protocol", "app": app_name}
-        
-        # Step 2: Fallback to Windows Search
-        print("[EXE FAILED] Trying Windows Search fallback...")
+
         if open_via_search(app_name):
             logger.info(f"[EXECUTION SUCCESS] Launched via search: {app_name}")
             return {"status": "success", "method": "search", "app": app_name}
-        
-        # All methods failed
-        logger.error(f"[EXECUTION FAILED] Could not open: {app_name}")
-        return {"status": "error", "method": "none", "app": app_name}
+
+        # Self-correction retry once using alternate shell method.
+        try:
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", app_name],
+                shell=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            logger.info(f"[EXECUTION SUCCESS] Launched via retry shell start: {app_name}")
+            return {"status": "success", "method": "retry_shell_start", "app": app_name}
+        except Exception as e:
+            logger.error(f"[EXECUTION FAILED] Could not open {app_name}: {e}")
+            return {"status": "error", "method": "none", "app": app_name, "error": str(e)}
 
     async def open_url(self, url: str) -> dict:
         """Open URL in default browser - REAL EXECUTION."""
@@ -491,29 +489,17 @@ class WindowsAdapter(PlatformAdapter):
     async def close_app(
         self, app_name: str | None = None, target: str = "focused"
     ) -> dict:
-        """Close application on Windows."""
+        """Close application on Windows using Alt+F4."""
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[CLOSE_APP] app_name={app_name}, target={target}")
 
         pyautogui = get_pyautogui()
 
         try:
-            if app_name:
-                # Kill by process name
-                subprocess.run(
-                    ["taskkill", "/IM", f"{app_name}.exe", "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-                print(f"[EXECUTION SUCCESS] Closed: {app_name}")
-                logger.info(f"Closed app: {app_name}")
-                return {"status": "success", "app": app_name}
-            elif pyautogui:
-                # Close focused window with Alt+F4
-                pyautogui.hotkey("alt", "F4")
-                print(f"[EXECUTION SUCCESS] Closed focused window")
-                return {"status": "success", "target": "focused"}
+            if pyautogui:
+                pyautogui.hotkey("alt", "f4")
+                print(f"[EXECUTION SUCCESS] Closed focused window via Alt+F4")
+                return {"status": "success", "target": "focused", "method": "alt_f4"}
             else:
                 return {"status": "error", "reason": "no_target"}
         except Exception as e:

@@ -421,8 +421,7 @@ class TestSafetyFilter:
         
         result = apply_safety_filter(intent_data)
         
-        # Per system spec: CONDITIONAL with requires_confirmation
-        assert result["intent"] == "CONDITIONAL"
+        assert result["intent"] == "CONFIRMATION_REQUIRED"
         assert result["slots"]["requires_confirmation"] is True
         assert result["slots"]["original_intent"] == "DELETE_FILE"
     
@@ -438,8 +437,7 @@ class TestSafetyFilter:
         
         result = apply_safety_filter(intent_data)
         
-        # Per system spec: CONDITIONAL with requires_confirmation
-        assert result["intent"] == "CONDITIONAL"
+        assert result["intent"] == "CONFIRMATION_REQUIRED"
         assert result["slots"]["requires_confirmation"] is True
     
     def test_dangerous_text_requires_confirmation(self):
@@ -454,9 +452,9 @@ class TestSafetyFilter:
         
         result = apply_safety_filter(intent_data)
         
-        # Per system spec: CONDITIONAL with requires_confirmation
-        assert result["intent"] == "CONDITIONAL"
+        assert result["intent"] == "CONFIRMATION_REQUIRED"
         assert result["slots"]["requires_confirmation"] is True
+        assert result["original_intent"] == "DELETE_FILE"
     
     def test_safe_intent_unchanged(self):
         """Safe intents should be unchanged."""
@@ -513,6 +511,19 @@ class TestIntelligencePipeline:
         
         assert result.is_valid is True
         assert result.intent_data["intent"] == "OPEN_APP"
+
+    def test_pre_intent_safety_intercepts_dangerous_input(self):
+        """Dangerous raw input should be intercepted before intent logic."""
+        from agent.core.intelligence_layer import process_with_intelligence
+
+        result = process_with_intelligence(
+            "delete C:\\Windows\\System32\\drivers\\etc\\hosts",
+            {"intent": "UNKNOWN", "slots": {}, "confidence": 0.2},
+        )
+
+        assert result.intent_data["intent"] == "CONFIRMATION_REQUIRED"
+        assert result.metadata.get("pre_intent_safety") is True
+        assert result.intent_data["original_intent"] == "DELETE_FILE"
     
     def test_goal_expansion_fallback(self):
         """High-level goal should expand."""

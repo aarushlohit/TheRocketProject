@@ -15,11 +15,13 @@ from typing import Any, Callable, Optional
 from agent.core.result import Result
 from agent.core.execution_engine import ExecutionEngine, ExecutionResult
 from agent.core.intelligent_pipeline import IntelligentPipeline, PipelineResult
+from agent.core.intent import Intent
+from agent.core.safety import pre_intent_safety_check, override_type_text_misuse
 from agent.core.user_profile import UserProfile, get_or_create_profile
 from agent.platform.adapter import get_platform_adapter
 from agent.stage0.executor import ActionExecutor
 from agent.stage0.pipeline import DrawToActionPipeline
-from agent.stage0.validation import StageZeroValidationError
+from agent.stage0.validation import StageZeroValidationError, text_to_intent
 from agent.utils.app_map import normalize_app
 from agent.utils.config import Config
 from agent.utils.logger import get_logger
@@ -116,10 +118,73 @@ class NovaStageZeroAgent:
                 },
             )
 
+            safety_intercept = pre_intent_safety_check(
+                inference.normalized_text,
+                getattr(self, "user_profile", None),
+            )
+            if safety_intercept is not None:
+                payload = {
+                    "type": "result",
+                    "status": "blocked",
+                    "intent": safety_intercept["intent"],
+                    "message": "Dangerous operation requires confirmation",
+                    "normalized_text": inference.normalized_text,
+                    "confidence": safety_intercept.get("confidence", 1.0),
+                    "model": inference.model,
+                    "slots": safety_intercept.get("slots", {}),
+                    "reason": safety_intercept.get("reason"),
+                    "original_intent": safety_intercept.get("original_intent"),
+                    "confirmation_mode": safety_intercept.get("confirmation_mode"),
+                    "confirmation_modes": safety_intercept.get("confirmation_modes", []),
+                    "accessibility": safety_intercept.get("accessibility", {}),
+                    "verified": False,
+                }
+                self._trace_block(
+                    "FINAL RESULT",
+                    {"status": payload["status"], "message": payload["message"]},
+                )
+                return payload
+
+            if inference.intent.action == "UNKNOWN":
+                # Deterministic fallback from normalized text so clear commands are not blocked.
+                fallback_action, fallback_app = text_to_intent(inference.normalized_text)
+                if fallback_action:
+                    fallback_slots = {"app": fallback_app} if fallback_action == "OPEN_APP" and fallback_app else {}
+                    inference.intent = Intent(
+                        action=fallback_action,
+                        parameters=fallback_slots,
+                        confidence=max(inference.intent.confidence, 0.75),
+                        metadata={"normalized_text": inference.normalized_text, "fallback": "text_to_intent"},
+                    )
+                else:
+                    payload = {
+                        "type": "result",
+                        "status": "error",
+                        "intent": "UNKNOWN",
+                        "message": inference.message or "Could not determine intent",
+                        "normalized_text": inference.normalized_text,
+                        "confidence": inference.intent.confidence,
+                        "model": inference.model,
+                        "slots": inference.intent.parameters,
+                        "reason": "uncertain intent",
+                        "verified": False,
+                    }
+                    self._trace_block(
+                        "FINAL RESULT",
+                        {"status": payload["status"], "message": payload["message"]},
+                    )
+                    return payload
+
+            # Context memory: avoid reopening the same app in consecutive commands.
+            if inference.intent.action == "OPEN_APP":
+                requested_app = str(inference.intent.parameters.get("app", "")).strip().lower()
+                if requested_app and self.last_opened_app and requested_app == self.last_opened_app.lower():
+                    inference.intent.action = "FOCUS_WINDOW"
+                    inference.intent.parameters = {"app": requested_app}
+
             # =================================================================
-            # STEP 2: EXECUTE VIA INTELLIGENT PIPELINE (UNIFIED)
+            # STEP 2: EXECUTE (DETERMINISTIC FIRST)
             # =================================================================
-            # Convert inference to pipeline format
             intent_data = {
                 "intent": inference.intent.action,
                 "slots": inference.intent.parameters,
@@ -127,10 +192,46 @@ class NovaStageZeroAgent:
                 "normalized_text": inference.normalized_text,
                 "_model_used": inference.model,
             }
+
+            # Type-text safety override (system path / dangerous text misuse).
+            type_text_override = override_type_text_misuse(
+                intent_data,
+                getattr(self, "user_profile", None),
+            )
+            if type_text_override is not None:
+                payload = {
+                    "type": "result",
+                    "status": "error",
+                    "intent": type_text_override.get("intent", "CONFIRMATION_REQUIRED"),
+                    "message": "Dangerous TYPE_TEXT requires confirmation",
+                    "normalized_text": inference.normalized_text,
+                    "confidence": type_text_override.get("confidence", 1.0),
+                    "model": inference.model,
+                    "slots": type_text_override.get("slots", {}),
+                    "reason": type_text_override.get("reason", "dangerous_operation"),
+                    "original_intent": type_text_override.get("original_intent"),
+                    "confirmation_mode": type_text_override.get("confirmation_mode"),
+                    "confirmation_modes": type_text_override.get("confirmation_modes", []),
+                    "accessibility": type_text_override.get("accessibility", {}),
+                    "verified": False,
+                }
+                self._trace_block(
+                    "FINAL RESULT",
+                    {"status": payload["status"], "message": payload["message"]},
+                )
+                return payload
             
-            # UNIFIED FLOW: ALL execution goes through IntelligentPipeline
-            # Pipeline runs: refine → plan → guardrails → execute → verify
-            result = await self.pipeline_engine.process(intent_data)
+            result = await self.executor.execute(inference.intent)
+
+            # Fallback: if deterministic path reports unsupported intent, try intelligent pipeline.
+            if (
+                isinstance(result, Result)
+                and result.status == "error"
+                and result.error_code == "UNSUPPORTED_INTENT"
+                and hasattr(self, "pipeline_engine")
+                and self.pipeline_engine is not None
+            ):
+                result = await self.pipeline_engine.process(intent_data)
             
             # =================================================================
             # STEP 3: BUILD RESPONSE
@@ -223,13 +324,66 @@ class NovaStageZeroAgent:
                 "message": f"Failed to process drawing: {e}",
             }
 
+    async def handle_text_input(
+        self,
+        text: str,
+        ws_callback: Optional[Callable[[dict], Any]] = None,
+    ) -> dict:
+        """Process plain text input through deterministic parser and executor."""
+        if ws_callback:
+            self.pipeline_engine.set_websocket_callback(ws_callback)
+
+        try:
+            inference = await self.pipeline.process_text_input(text)
+
+            safety_intercept = pre_intent_safety_check(
+                inference.normalized_text,
+                getattr(self, "user_profile", None),
+            )
+            if safety_intercept is not None:
+                return {
+                    "type": "result",
+                    "status": "error",
+                    "intent": safety_intercept["intent"],
+                    "message": "Dangerous operation requires confirmation",
+                    "normalized_text": inference.normalized_text,
+                    "confidence": safety_intercept.get("confidence", 1.0),
+                    "model": inference.model,
+                    "slots": safety_intercept.get("slots", {}),
+                    "reason": safety_intercept.get("reason"),
+                    "original_intent": safety_intercept.get("original_intent"),
+                    "confirmation_mode": safety_intercept.get("confirmation_mode"),
+                    "confirmation_modes": safety_intercept.get("confirmation_modes", []),
+                    "accessibility": safety_intercept.get("accessibility", {}),
+                    "verified": False,
+                }
+
+            result = await self.executor.execute(inference.intent)
+            self._update_context(inference.intent.action, inference.intent.parameters, result)
+            return self._build_mobile_response(
+                result=result,
+                intent_name=inference.intent.action,
+                normalized_text=inference.normalized_text,
+                confidence=inference.intent.confidence,
+                model=inference.model,
+                slots=inference.intent.parameters,
+            )
+        except Exception as exc:
+            logger.exception("Text input execution failed")
+            return {
+                "type": "error",
+                "status": "error",
+                "intent": None,
+                "message": f"Execution failed: {exc}",
+            }
+
     async def close(self) -> None:
         await self.pipeline.close()
 
     def _build_mobile_response(
         self,
         *,
-        result: ExecutionResult | PipelineResult,
+        result: Result | ExecutionResult | PipelineResult,
         intent_name: str,
         normalized_text: str,
         confidence: float,
@@ -262,6 +416,24 @@ class NovaStageZeroAgent:
                 payload["total_steps"] = result.plan_result.total_steps
             
             return payload
+
+        if isinstance(result, Result):
+            payload = {
+                "type": "result",
+                "status": result.status,
+                "intent": intent_name,
+                "message": result.message,
+                "normalized_text": normalized_text,
+                "confidence": confidence,
+                "model": model,
+                "slots": slots,
+                "verified": result.status == "success",
+            }
+            if result.data:
+                payload.update(result.data)
+            if result.error_code:
+                payload["error_code"] = result.error_code
+            return payload
         
         # Handle ExecutionResult (legacy fallback)
         payload = {
@@ -281,7 +453,12 @@ class NovaStageZeroAgent:
             payload["error_code"] = result.error_code
         return payload
 
-    def _update_context(self, intent_name: str, slots: dict, result: ExecutionResult | PipelineResult) -> None:
+    def _update_context(
+        self,
+        intent_name: str,
+        slots: dict,
+        result: Result | ExecutionResult | PipelineResult,
+    ) -> None:
         """
         Update agent context after execution.
         

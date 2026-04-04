@@ -70,9 +70,9 @@ def test_executor_routes_open_app():
             )
         )
 
-        assert platform.calls == [("open_app", "google-chrome-stable")]
+        assert platform.calls == [("open_app", "chrome")]
         assert result.status == "success"
-        assert result.message == "Opened Google-Chrome-Stable"
+        assert result.message == "Opened chrome"
 
 
 def test_executor_routes_screenshot():
@@ -117,7 +117,7 @@ def test_executor_returns_debug_in_dry_run_mode():
         assert result.status == "debug"
         assert result.message == "Dry run executed"
         assert result.data["intent"] == "OPEN_APP"
-        assert result.data["slots"]["app"] == "Calculator"
+        assert result.data["slots"]["app"] == "calculator"
 
 
 def test_executor_catches_platform_errors():
@@ -138,10 +138,10 @@ def test_executor_catches_platform_errors():
         )
 
         assert result.status == "error"
-        assert result.message == "could not launch calc"
+        assert result.message == "could not launch calculator"
 
 
-def test_executor_returns_app_not_installed():
+def test_executor_does_not_block_when_availability_checker_false():
     with TemporaryDirectory() as temp_dir:
         platform = FakePlatform()
         executor = ActionExecutor(
@@ -158,6 +158,6 @@ def test_executor_returns_app_not_installed():
             )
         )
 
-        assert platform.calls == []
-        assert result.status == "error"
-        assert result.message == "App not installed"
+        assert platform.calls == [("open_app", "calculator")]
+        assert result.status == "success"
+        assert result.message == "Opened calculator"

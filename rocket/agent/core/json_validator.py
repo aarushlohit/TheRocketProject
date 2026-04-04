@@ -17,6 +17,10 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from agent.core.intent_system import (
+    REQUIRED_SLOTS as CANONICAL_REQUIRED_SLOTS,
+    VALID_INTENTS as CANONICAL_VALID_INTENTS,
+)
 from agent.utils.logger import get_logger
 
 
@@ -31,30 +35,11 @@ logger = get_logger(__name__)
 MIN_CONFIDENCE_THRESHOLD = 0.7
 
 # Supported intents
-VALID_INTENTS = {
-    "OPEN_APP",
-    "OPEN_URL",
-    "SEARCH_WEB",
-    "TYPE_TEXT",
-    "PRESS_KEYS",
-    "MULTI_STEP",
-    "SCREENSHOT",
-    "CLOSE_APP",
-    "MINIMIZE",
-    "MAXIMIZE",
-    "SCROLL",
-    "CLICK",
-    "UNKNOWN",
-}
+VALID_INTENTS = set(CANONICAL_VALID_INTENTS)
 
 # Required slots per intent
 REQUIRED_SLOTS: Dict[str, List[str]] = {
-    "OPEN_APP": ["app"],
-    "OPEN_URL": ["url"],
-    "SEARCH_WEB": ["query"],
-    "TYPE_TEXT": ["text"],
-    "PRESS_KEYS": ["keys"],
-    "MULTI_STEP": ["steps"],
+    intent: list(slots) for intent, slots in CANONICAL_REQUIRED_SLOTS.items()
 }
 
 # Known app patterns (basic validation)
@@ -224,10 +209,13 @@ class JSONValidator:
         if intent == "OPEN_APP":
             app = slots.get("app", "")
             if app:
-                # Check app name is not a command word
+                # FIX 2: VALIDATION RELAXATION
+                # NEVER mark OPEN_APP as invalid due to app resolution.
+                # Let execution layer handle app opening via Search fallback.
                 if self._is_command_word(app):
-                    errors.append(f"Invalid app name (command word): {app}")
-                    print(f"[VALIDATION ERROR] App name is command word: {app}")
+                    # Downgrade to warning instead of error
+                    warnings.append(f"App name looks like command word: {app}")
+                    print(f"[VALIDATION WARN] App name is command word (allowed): {app}")
                 else:
                     print(f"[VALIDATION PASS] App name valid: {app}")
         

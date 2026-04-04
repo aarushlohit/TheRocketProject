@@ -192,6 +192,9 @@ class ExecutionPlanner:
         3. Compound text patterns → auto-expand to MULTI_STEP
         4. Single intent → wrap in plan
         
+        FIX 5: FORCE MULTI-STEP
+        Always wrap intents in MULTI_STEP structure for consistent execution.
+        
         Args:
             intent_data: Intent JSON from model or refiner
             
@@ -208,6 +211,22 @@ class ExecutionPlanner:
         
         print(f"[INTENT] {intent_type}")
         print(f"[SLOTS] {slots}")
+        
+        # FIX 5: If not already MULTI_STEP, wrap it
+        if intent_type != "MULTI_STEP":
+            print(f"[FORCE MULTI-STEP] Wrapping {intent_type} in MULTI_STEP structure")
+            intent_data = {
+                "intent": "MULTI_STEP",
+                "steps": [
+                    {
+                        "intent": intent_type,
+                        "slots": slots,
+                        "confidence": confidence,
+                    }
+                ],
+                "confidence": confidence,
+            }
+            intent_type = "MULTI_STEP"
         
         # =================================================================
         # Case 1: Direct MULTI_STEP intent from model

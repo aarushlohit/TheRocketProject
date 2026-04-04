@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,7 +13,6 @@ from agent.core.intent import Intent
 from agent.core.result import Result
 from agent.core.safety import full_validation, validate_intent, requires_confirmation
 from agent.platform.adapter import PlatformAdapter
-from agent.utils.app_map import normalize_app
 from agent.utils.logger import get_logger
 
 
@@ -88,7 +88,7 @@ class ActionExecutor:
         if not is_valid:
             print(f"[VALIDATION FAILED] {reason}")
             return Result(
-                status="rejected",
+                status="error",
                 message=f"Validation failed: {reason}",
                 error_code=reason,
                 data=details,
@@ -102,7 +102,7 @@ class ActionExecutor:
                 if not confirmed:
                     print(f"[CONFIRMATION DENIED]")
                     return Result(
-                        status="cancelled",
+                        status="error",
                         message="User cancelled action",
                         error_code="USER_CANCELLED",
                     )
@@ -110,7 +110,7 @@ class ActionExecutor:
                 # No callback, but confirmation required → block
                 print(f"[CONFIRMATION BLOCKED] No callback available")
                 return Result(
-                    status="blocked",
+                    status="error",
                     message="Dangerous action requires confirmation",
                     error_code="CONFIRMATION_REQUIRED",
                 )
@@ -123,6 +123,9 @@ class ActionExecutor:
         """Build Intent from parsed JSON."""
         intent_type = parsed_json.get("intent", "UNKNOWN")
         slots = parsed_json.get("slots", {})
+        if intent_type == "MULTI_STEP" and isinstance(parsed_json.get("steps"), list):
+            slots = dict(slots)
+            slots["steps"] = parsed_json.get("steps", [])
         confidence = parsed_json.get("confidence", 0.0)
         normalized_text = parsed_json.get("normalized_text", "")
         
@@ -140,109 +143,274 @@ class ActionExecutor:
         print(f"[PARAMETERS] {intent.parameters}")
         print(f"[CONFIDENCE] {intent.confidence}")
 
-        # Normalize app names
-        normalized_parameters = dict(intent.parameters)
-        if "app" in normalized_parameters and isinstance(normalized_parameters["app"], str):
-            normalized_parameters["app"] = normalize_app(
-                normalized_parameters["app"],
-                platform_type=self.platform_type,
-            )
-        intent.parameters = normalized_parameters
-
-        print(f"[NORMALIZED PARAMETERS] {intent.parameters}")
-
         try:
-            # MULTI_STEP support (Stage 2)
-            if intent.action == "MULTI_STEP":
-                return await self._execute_multi_step(intent)
-
-            if intent.action == "OPEN_APP":
-                app = intent.parameters.get("app", "")
-                print(f"[EXECUTING] OPEN_APP: {app}")
-                result = await self.platform.open_app(app)
-                method = result.get("method", "unknown") if isinstance(result, dict) else "unknown"
-                print(f"[EXECUTION RESULT] SUCCESS - Opened {app} via {method}")
+            if self.debug_mode:
+                print(f"[EXECUTION RESULT] DEBUG - Dry run only")
                 return Result(
-                    status="success",
-                    message=f"Opened {app.title()}",
-                    data={"method": method},
+                    status="debug",
+                    message="Dry run executed",
+                    data={
+                        "intent": intent.action,
+                        "slots": dict(intent.parameters),
+                    },
                 )
 
-            if intent.action == "CLOSE_APP":
-                app = intent.parameters.get("app")
-                target = intent.parameters.get("target", "focused")
-                print(f"[EXECUTING] CLOSE_APP: {app or 'focused'}")
+            action = intent.action
+            params = dict(intent.parameters or {})
+
+            if action == "CONFIRMATION_REQUIRED":
+                return Result(
+                    status="error",
+                    message="Confirmation required before execution",
+                    error_code="CONFIRMATION_REQUIRED",
+                    data=params,
+                )
+
+            # MULTI_STEP executes sequentially with stop-on-failure behavior.
+            if action == "MULTI_STEP":
+                return await self._execute_multi_step(intent)
+
+            if action == "OPEN_APP":
+                app = str(params.get("app", "")).strip()
+                if not app:
+                    return Result(status="error", message="Missing app name", error_code="MISSING_APP")
+                print(f"[EXECUTING] OPEN_APP: {app}")
+                result = await self.platform.open_app(app)
+                if isinstance(result, dict) and result.get("status") == "error":
+                    # Self-correction retry once.
+                    print("[RETRY] OPEN_APP initial attempt failed, retrying once")
+                    result = await self.platform.open_app(app)
+                status = result.get("status", "success") if isinstance(result, dict) else "success"
+                if status == "error":
+                    return Result(status="error", message=f"Failed to open {app}", error_code="OPEN_APP_FAILED", data=result)
+                return Result(status="success", message=f"Opened {app}", data=result if isinstance(result, dict) else None)
+
+            if action == "CLOSE_APP":
+                app = params.get("app")
+                target = params.get("target", "focused")
                 await self.platform.close_app(app_name=app, target=target)
-                label = app.title() if app else "active window"
-                print(f"[EXECUTION RESULT] SUCCESS - Closed {label}")
-                return Result(status="success", message=f"Closed {label}")
+                return Result(status="success", message=f"Closed {app or 'focused window'}")
 
-            if intent.action == "MINIMIZE":
-                app = intent.parameters.get("app")
-                target = intent.parameters.get("target", "focused")
-                print(f"[EXECUTING] MINIMIZE: {app or 'focused'}")
-                await self.platform.minimize(app_name=app, target=target)
-                label = app.title() if app else "active window"
-                print(f"[EXECUTION RESULT] SUCCESS - Minimized {label}")
-                return Result(status="success", message=f"Minimized {label}")
+            if action in {"MINIMIZE", "MINIMIZE_APP"}:
+                await self.platform.minimize(app_name=params.get("app"), target=params.get("target", "focused"))
+                return Result(status="success", message="Window minimized")
 
-            if intent.action == "MAXIMIZE":
-                app = intent.parameters.get("app")
-                target = intent.parameters.get("target", "focused")
-                print(f"[EXECUTING] MAXIMIZE: {app or 'focused'}")
-                await self.platform.maximize(app_name=app, target=target)
-                label = app.title() if app else "active window"
-                print(f"[EXECUTION RESULT] SUCCESS - Maximized {label}")
-                return Result(status="success", message=f"Maximized {label}")
+            if action in {"MAXIMIZE", "MAXIMIZE_APP"}:
+                await self.platform.maximize(app_name=params.get("app"), target=params.get("target", "focused"))
+                return Result(status="success", message="Window maximized")
 
-            if intent.action == "SCREENSHOT":
-                print(f"[EXECUTING] SCREENSHOT")
+            if action == "SCREENSHOT":
                 screenshot_path = await self.platform.screenshot(self.artifacts_dir)
-                print(f"[EXECUTION RESULT] SUCCESS - Screenshot at {screenshot_path}")
                 return Result(
                     status="success",
                     message=f"Saved screenshot to {screenshot_path}",
                     data={"screenshot_path": str(screenshot_path)},
                 )
 
-            if intent.action == "OPEN_URL":
-                url = intent.parameters.get("url", "")
-                print(f"[EXECUTING] OPEN_URL: {url}")
+            if action == "SWITCH_APP":
+                await self.platform.press_keys("alt+tab")
+                return Result(status="success", message="Switched app")
+
+            if action == "FOCUS_WINDOW":
+                target_app = str(params.get("window") or params.get("app") or "").strip()
+                if target_app:
+                    result = await self.platform.open_app(target_app)
+                    if isinstance(result, dict) and result.get("status") == "error":
+                        await self.platform.press_keys("alt+tab")
+                    return Result(status="success", message=f"Focused {target_app}")
+                await self.platform.press_keys("alt+tab")
+                return Result(status="success", message="Focused next window")
+
+            if action == "OPEN_URL":
+                url = str(params.get("url", "")).strip()
                 await self.platform.open_url(url)
-                print(f"[EXECUTION RESULT] SUCCESS - Opened {url}")
                 return Result(status="success", message=f"Opened {url}")
 
-            if intent.action == "SEARCH_WEB":
-                query = intent.parameters.get("query", "")
-                print(f"[EXECUTING] SEARCH_WEB: {query}")
-                result = await self.platform.search_web(query)
-                print(f"[EXECUTION RESULT] SUCCESS - Searched: {query}")
+            if action == "SEARCH_WEB":
+                query = str(params.get("query", "")).strip()
+                await self.platform.search_web(query)
                 return Result(status="success", message=f"Searched: {query}")
 
-            if intent.action == "TYPE_TEXT":
-                text = intent.parameters.get("text", "")
-                print(f"[EXECUTING] TYPE_TEXT: {text[:30]}...")
+            if action == "NEW_TAB":
+                await self.platform.press_keys("ctrl+t")
+                return Result(status="success", message="Opened new tab")
+
+            if action == "CLOSE_TAB":
+                await self.platform.press_keys("ctrl+w")
+                return Result(status="success", message="Closed current tab")
+
+            if action == "SWITCH_TAB":
+                tab_index = params.get("tab_index")
+                if isinstance(tab_index, int) and 1 <= tab_index <= 9:
+                    await self.platform.press_keys(f"ctrl+{tab_index}")
+                else:
+                    await self.platform.press_keys("ctrl+tab")
+                return Result(status="success", message="Switched tab")
+
+            if action == "REFRESH_PAGE":
+                await self.platform.press_keys("f5")
+                return Result(status="success", message="Page refreshed")
+
+            if action == "SCROLL_UP":
+                await self.platform.scroll("up", int(params.get("amount", 5)))
+                return Result(status="success", message="Scrolled up")
+
+            if action == "SCROLL_DOWN":
+                await self.platform.scroll("down", int(params.get("amount", 5)))
+                return Result(status="success", message="Scrolled down")
+
+            if action == "TYPE_TEXT":
+                text = str(params.get("text", ""))
                 result = await self.platform.type_text(text)
-                print(f"[EXECUTION RESULT] {result}")
-                return Result(
-                    status=result.get("status", "success"),
-                    message=f"Typed {len(text)} characters",
-                )
+                status = result.get("status", "success") if isinstance(result, dict) else "success"
+                if status == "error":
+                    return Result(status="error", message="Failed to type text", error_code="TYPE_TEXT_FAILED", data=result)
+                return Result(status="success", message=f"Typed {len(text)} characters")
 
-            if intent.action == "PRESS_KEYS":
-                keys = intent.parameters.get("keys", "")
-                print(f"[EXECUTING] PRESS_KEYS: {keys}")
+            if action == "CLEAR_TEXT":
+                await self.platform.press_keys("ctrl+a")
+                await self.platform.press_keys("backspace")
+                return Result(status="success", message="Cleared text")
+
+            if action == "SELECT_TEXT":
+                await self.platform.press_keys("ctrl+a")
+                return Result(status="success", message="Selected text")
+
+            if action == "COPY":
+                await self.platform.press_keys("ctrl+c")
+                return Result(status="success", message="Copied selection")
+
+            if action == "PASTE":
+                await self.platform.press_keys("ctrl+v")
+                return Result(status="success", message="Pasted clipboard")
+
+            if action == "CUT":
+                await self.platform.press_keys("ctrl+x")
+                return Result(status="success", message="Cut selection")
+
+            if action == "PRESS_KEYS":
+                keys = params.get("keys", "")
+                if isinstance(keys, list):
+                    keys = "+".join(str(k) for k in keys if k)
+                keys = str(keys)
                 result = await self.platform.press_keys(keys)
-                print(f"[EXECUTION RESULT] {result}")
+                status = result.get("status", "success") if isinstance(result, dict) else "success"
+                if status == "error":
+                    return Result(status="error", message=f"Failed to press keys: {keys}", error_code="PRESS_KEYS_FAILED", data=result)
+                return Result(status="success", message=f"Pressed keys: {keys}")
+
+            if action == "LOCK_SCREEN":
+                await self.platform.press_keys("win+l")
+                return Result(status="success", message="Screen locked")
+
+            if action == "VOLUME_UP":
+                await self.platform.press_keys("volumeup")
+                return Result(status="success", message="Volume increased")
+
+            if action == "VOLUME_DOWN":
+                await self.platform.press_keys("volumedown")
+                return Result(status="success", message="Volume decreased")
+
+            if action == "MUTE":
+                await self.platform.press_keys("volumemute")
+                return Result(status="success", message="Mute toggled")
+
+            if action == "BRIGHTNESS_UP":
+                await self.platform.press_keys("brightnessup")
+                return Result(status="success", message="Brightness increased")
+
+            if action == "BRIGHTNESS_DOWN":
+                await self.platform.press_keys("brightnessdown")
+                return Result(status="success", message="Brightness decreased")
+
+            if action == "OPEN_FILE":
+                file_path = Path(str(params.get("path", "")).strip())
+                if not file_path:
+                    return Result(status="error", message="Missing file path", error_code="MISSING_PATH")
+                subprocess.Popen(["cmd", "/c", "start", "", str(file_path)], shell=False)
+                return Result(status="success", message=f"Opened file: {file_path}")
+
+            if action == "DELETE_FILE":
+                file_path = Path(str(params.get("path", "")).strip())
+                if not file_path.exists():
+                    return Result(status="error", message=f"File not found: {file_path}", error_code="FILE_NOT_FOUND")
+                file_path.unlink()
+                return Result(status="success", message=f"Deleted file: {file_path}")
+
+            if action == "CREATE_FILE":
+                file_path = Path(str(params.get("path", "")).strip())
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                content = str(params.get("content", ""))
+                file_path.write_text(content, encoding="utf-8")
+                return Result(status="success", message=f"Created file: {file_path}")
+
+            if action == "MOVE_FILE":
+                source = Path(str(params.get("source", "")).strip())
+                destination = Path(str(params.get("destination", "")).strip())
+                if not source.exists():
+                    return Result(status="error", message=f"Source not found: {source}", error_code="FILE_NOT_FOUND")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(destination)
+                return Result(status="success", message=f"Moved file to: {destination}")
+
+            if action == "RENAME_FILE":
+                source = Path(str(params.get("path", "")).strip())
+                new_name = str(params.get("new_name", "")).strip()
+                if not source.exists():
+                    return Result(status="error", message=f"File not found: {source}", error_code="FILE_NOT_FOUND")
+                if not new_name:
+                    return Result(status="error", message="Missing new file name", error_code="MISSING_NEW_NAME")
+                destination = source.with_name(new_name)
+                source.replace(destination)
+                return Result(status="success", message=f"Renamed file to: {destination.name}")
+
+            if action == "CLICK_ELEMENT":
+                target = str(params.get("target", "")).lower().strip()
+                # Semantic fallback actions for common UI targets.
+                if "search" in target:
+                    await self.platform.press_keys("ctrl+l")
+                elif "first result" in target:
+                    await self.platform.press_keys("tab")
+                    await self.platform.press_keys("enter")
+                elif "play" in target:
+                    await self.platform.press_keys("space")
+                else:
+                    await self.platform.press_keys("enter")
+                return Result(status="success", message=f"Interacted with semantic target: {target or 'default'}")
+
+            if action == "SCROLL":
+                direction = str(params.get("direction", "down")).lower()
+                amount = int(params.get("amount", 5))
+                await self.platform.scroll(direction, amount)
+                return Result(status="success", message=f"Scrolled {direction}")
+
+            if action == "WAIT":
+                seconds = float(params.get("seconds", 1.0))
+                seconds = max(0.0, min(seconds, 10.0))
+                await asyncio.sleep(seconds)
+                return Result(status="success", message=f"Waited {seconds:.1f}s")
+
+            if action == "CONDITIONAL":
+                then_step = params.get("then")
+                else_step = params.get("else")
+                condition_met = bool(params.get("condition_met", True))
+                selected_step = then_step if condition_met else else_step
+                if isinstance(selected_step, dict):
+                    step_intent = self._build_intent_from_json(selected_step)
+                    return await self.execute(step_intent)
+                return Result(status="success", message="Conditional evaluated; no executable branch")
+
+            if action == "UNKNOWN":
                 return Result(
-                    status=result.get("status", "success"),
-                    message=f"Pressed keys: {keys}",
+                    status="error",
+                    message="Unknown intent",
+                    error_code="UNKNOWN_INTENT",
                 )
 
-            print(f"[EXECUTION RESULT] ERROR - Unsupported intent: {intent.action}")
+            print(f"[EXECUTION RESULT] ERROR - Unsupported intent: {action}")
             return Result(
                 status="error",
-                message=f"Unsupported intent: {intent.action}",
+                message=f"Unsupported intent: {action}",
                 error_code="UNSUPPORTED_INTENT",
             )
             

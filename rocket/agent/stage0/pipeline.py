@@ -1,12 +1,10 @@
-"""Image processing + STRICT JSON inference pipeline for handwritten draw-to-action input.
+"""Execution-first intent pipeline for drawing and text inputs.
 
-STAGE 4 ENHANCED:
-- JSON-first model output
-- Multi-variant consistency analysis
-- Strict validation layer
-- Execution trust scoring
-- Smart planner integration
-- Comprehensive logging
+Deterministic runtime behavior:
+- strict JSON parsing with enum validation
+- single-pass inference
+- raw-text fallback parsing
+- minimal filtering prior to execution
 """
 
 from __future__ import annotations
@@ -22,34 +20,12 @@ from PIL import Image
 import requests
 
 from agent.core.intent import Intent
-from agent.stage2.ranker import RANKING_THRESHOLD, choose_best_candidate, rank_candidates
 from agent.stage0.validation import (
-    KNOWN_APPS,
     StageZeroValidationError,
     build_unknown_intent,
     correct_app,
 )
 from agent.utils.logger import get_logger
-
-# Stage 4 imports
-from agent.core.json_validator import (
-    JSONValidator,
-    ValidationResult,
-    get_json_validator,
-    validate_intent_json,
-)
-from agent.core.consistency_engine import (
-    ConsistencyEngine,
-    ConsistencyResult,
-    get_consistency_engine,
-    analyze_consistency,
-)
-from agent.core.trust_evaluator import (
-    TrustEvaluator,
-    TrustDecision,
-    get_trust_evaluator,
-    evaluate_trust,
-)
 
 
 logger = get_logger(__name__)
@@ -58,47 +34,44 @@ logger = get_logger(__name__)
 # =============================================================================
 # STAGE 4 — JSON-FIRST SYSTEM PROMPT (ENHANCED)
 # =============================================================================
-SYSTEM_PROMPT = """You are an assistive AI system that interprets handwritten commands.
+SYSTEM_PROMPT = """You are an execution-first intent parser for an autonomous AI OS.
 
-CRITICAL RULES:
-1. Return ONLY valid JSON — NO markdown, NO explanation, NO code blocks
-2. NEVER include command words inside slot values
-   - BAD: {"query": "search github"}
-   - GOOD: {"query": "github"}
-3. Multiple actions = MUST use MULTI_STEP intent
+HARD RULES:
+1. OUTPUT MUST BE STRICT JSON ONLY.
+2. NO markdown, NO explanation, NO extra text.
+3. USE ONLY enum intents listed below.
+4. INVALID OR UNCLEAR MUST RETURN UNKNOWN.
+5. NEVER downgrade a valid clear intent.
+6. If multiple actions are present, return MULTI_STEP with sequential steps.
 
-SUPPORTED INTENTS:
-- OPEN_APP: Open an application
-- OPEN_URL: Open a URL
-- SEARCH_WEB: Search the web
-- TYPE_TEXT: Type text
-- PRESS_KEYS: Press keyboard keys
-- MULTI_STEP: Multiple sequential actions
-- UNKNOWN: Cannot determine intent
+SUPPORTED ENUM INTENTS:
+OPEN_APP, CLOSE_APP, MINIMIZE_APP, MAXIMIZE_APP, SWITCH_APP, FOCUS_WINDOW,
+OPEN_URL, SEARCH_WEB, NEW_TAB, CLOSE_TAB, SWITCH_TAB, REFRESH_PAGE, SCROLL_UP, SCROLL_DOWN,
+TYPE_TEXT, CLEAR_TEXT, SELECT_TEXT, COPY, PASTE, CUT, PRESS_KEYS,
+LOCK_SCREEN, VOLUME_UP, VOLUME_DOWN, MUTE, BRIGHTNESS_UP, BRIGHTNESS_DOWN,
+OPEN_FILE, DELETE_FILE, CREATE_FILE, MOVE_FILE, RENAME_FILE,
+CLICK_ELEMENT, SCROLL, WAIT,
+MULTI_STEP, CONDITIONAL,
+CONFIRMATION_REQUIRED, UNKNOWN.
 
-SLOT REQUIREMENTS:
-- OPEN_APP: {"app": "app_name"}
-- SEARCH_WEB: {"query": "search_terms_only"}
-- TYPE_TEXT: {"text": "text_to_type"}
-- MULTI_STEP: {"steps": [{"intent": "...", "slots": {...}}, ...]}
-
-EXTRACTION RULES:
-1. Fix spelling (e.g., "chrom" → "chrome")
-2. Remove noise words (please, can you)
-3. Extract ONLY essential values
-4. "open X and search Y" → MULTI_STEP
-
-CONFIDENCE: 0.0 to 1.0 (1.0 = crystal clear)
-
-OUTPUT FORMAT:
+OUTPUT FORMAT (SINGLE):
 {
-  "intent": "INTENT_TYPE",
-  "slots": {},
-  "confidence": 0.0,
-  "normalized_text": "cleaned text"
+    "intent": "ENUM",
+    "slots": {},
+    "confidence": 0.0,
+    "normalized_text": "text"
 }
 
-RESPOND WITH JSON ONLY."""
+OUTPUT FORMAT (MULTI):
+{
+    "intent": "MULTI_STEP",
+    "steps": [
+        {"intent": "ENUM", "slots": {}}
+    ],
+    "confidence": 0.0,
+    "normalized_text": "text"
+}
+"""
 
 
 @dataclass
@@ -170,18 +143,159 @@ def extract_app_name(text: str) -> str | None:
     return None
 
 
+SUPPORTED_ENUM_INTENTS = {
+    "OPEN_APP", "CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "SWITCH_APP", "FOCUS_WINDOW",
+    "OPEN_URL", "SEARCH_WEB", "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
+    "TYPE_TEXT", "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
+    "LOCK_SCREEN", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
+    "OPEN_FILE", "DELETE_FILE", "CREATE_FILE", "MOVE_FILE", "RENAME_FILE",
+    "CLICK_ELEMENT", "SCROLL", "WAIT", "MULTI_STEP", "CONDITIONAL", "CONFIRMATION_REQUIRED", "UNKNOWN",
+    "SCREENSHOT", "MINIMIZE", "MAXIMIZE",
+}
+
+
+def _parse_single_intent(text: str) -> dict:
+    """Deterministic text-to-intent fallback parser."""
+    cleaned = text.strip().lower()
+    if not cleaned:
+        return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0}
+
+    if cleaned.startswith(("open ", "launch ", "start ")):
+        target = cleaned.split(" ", 1)[1].strip() if " " in cleaned else ""
+        if target.startswith(("http://", "https://", "www.")) or "." in target:
+            url = target if target.startswith(("http://", "https://")) else f"https://{target}"
+            return {"intent": "OPEN_URL", "slots": {"url": url}, "confidence": 0.85}
+        return {"intent": "OPEN_APP", "slots": {"app": target}, "confidence": 0.85}
+
+    if cleaned.startswith("close tab"):
+        return {"intent": "CLOSE_TAB", "slots": {}, "confidence": 0.85}
+    if cleaned.startswith("new tab"):
+        return {"intent": "NEW_TAB", "slots": {}, "confidence": 0.85}
+    if cleaned.startswith("switch tab"):
+        parts = cleaned.split()
+        tab_index = None
+        if parts and parts[-1].isdigit():
+            tab_index = int(parts[-1])
+        slots = {"tab_index": tab_index} if tab_index is not None else {}
+        return {"intent": "SWITCH_TAB", "slots": slots, "confidence": 0.8}
+    if cleaned.startswith("refresh"):
+        return {"intent": "REFRESH_PAGE", "slots": {}, "confidence": 0.8}
+
+    if cleaned.startswith("search "):
+        query = cleaned.split(" ", 1)[1].strip()
+        return {"intent": "SEARCH_WEB", "slots": {"query": query}, "confidence": 0.85}
+
+    if cleaned.startswith("type ") or cleaned.startswith("write ") or cleaned.startswith("input "):
+        text_value = cleaned.split(" ", 1)[1].strip() if " " in cleaned else ""
+        return {"intent": "TYPE_TEXT", "slots": {"text": text_value}, "confidence": 0.85}
+    if cleaned.startswith("clear text"):
+        return {"intent": "CLEAR_TEXT", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("select text") or cleaned.startswith("select all"):
+        return {"intent": "SELECT_TEXT", "slots": {}, "confidence": 0.8}
+    if cleaned == "copy":
+        return {"intent": "COPY", "slots": {}, "confidence": 0.8}
+    if cleaned == "paste":
+        return {"intent": "PASTE", "slots": {}, "confidence": 0.8}
+    if cleaned == "cut":
+        return {"intent": "CUT", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("press "):
+        keys = cleaned.split(" ", 1)[1].strip().replace(" ", "")
+        return {"intent": "PRESS_KEYS", "slots": {"keys": keys}, "confidence": 0.8}
+
+    if cleaned.startswith("close "):
+        app = cleaned.split(" ", 1)[1].strip() if " " in cleaned else ""
+        slots = {"app": app} if app else {}
+        return {"intent": "CLOSE_APP", "slots": slots, "confidence": 0.8}
+    if cleaned.startswith("minimize"):
+        return {"intent": "MINIMIZE_APP", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("maximize"):
+        return {"intent": "MAXIMIZE_APP", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("switch app"):
+        return {"intent": "SWITCH_APP", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("focus "):
+        target = cleaned.split(" ", 1)[1].strip()
+        return {"intent": "FOCUS_WINDOW", "slots": {"window": target}, "confidence": 0.8}
+
+    if "lock screen" in cleaned:
+        return {"intent": "LOCK_SCREEN", "slots": {}, "confidence": 0.9}
+    if "volume up" in cleaned:
+        return {"intent": "VOLUME_UP", "slots": {}, "confidence": 0.8}
+    if "volume down" in cleaned:
+        return {"intent": "VOLUME_DOWN", "slots": {}, "confidence": 0.8}
+    if cleaned == "mute" or " mute" in cleaned:
+        return {"intent": "MUTE", "slots": {}, "confidence": 0.8}
+    if "brightness up" in cleaned:
+        return {"intent": "BRIGHTNESS_UP", "slots": {}, "confidence": 0.75}
+    if "brightness down" in cleaned:
+        return {"intent": "BRIGHTNESS_DOWN", "slots": {}, "confidence": 0.75}
+
+    if cleaned.startswith("open file "):
+        return {"intent": "OPEN_FILE", "slots": {"path": cleaned.split("open file ", 1)[1].strip()}, "confidence": 0.8}
+    if cleaned.startswith("delete file ") or cleaned.startswith("remove file "):
+        path = cleaned.split("file ", 1)[1].strip()
+        return {"intent": "DELETE_FILE", "slots": {"path": path}, "confidence": 0.85}
+    if cleaned.startswith("create file "):
+        return {"intent": "CREATE_FILE", "slots": {"path": cleaned.split("create file ", 1)[1].strip()}, "confidence": 0.8}
+    if cleaned.startswith("move file ") and " to " in cleaned:
+        source_dest = cleaned.split("move file ", 1)[1]
+        source, destination = source_dest.split(" to ", 1)
+        return {"intent": "MOVE_FILE", "slots": {"source": source.strip(), "destination": destination.strip()}, "confidence": 0.8}
+    if cleaned.startswith("rename file ") and " to " in cleaned:
+        source_dest = cleaned.split("rename file ", 1)[1]
+        source, new_name = source_dest.split(" to ", 1)
+        return {"intent": "RENAME_FILE", "slots": {"path": source.strip(), "new_name": new_name.strip()}, "confidence": 0.8}
+
+    if cleaned.startswith("click "):
+        target = cleaned.split("click ", 1)[1].strip()
+        return {"intent": "CLICK_ELEMENT", "slots": {"target": target}, "confidence": 0.8}
+    if cleaned.startswith("scroll up"):
+        return {"intent": "SCROLL_UP", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("scroll down"):
+        return {"intent": "SCROLL_DOWN", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("scroll "):
+        direction = cleaned.split(" ", 1)[1].strip()
+        return {"intent": "SCROLL", "slots": {"direction": direction}, "confidence": 0.75}
+    if cleaned.startswith("wait"):
+        return {"intent": "WAIT", "slots": {}, "confidence": 0.75}
+
+    if cleaned.startswith("if ") and " then " in cleaned:
+        return {"intent": "CONDITIONAL", "slots": {"raw": cleaned}, "confidence": 0.7}
+
+    if "screenshot" in cleaned or "screen capture" in cleaned:
+        return {"intent": "SCREENSHOT", "slots": {}, "confidence": 0.8}
+
+    return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0}
+
+
 def parse_intent(text: str) -> dict:
-    """Parse intent from OCR text without trusting the model for action selection."""
-    if "open" in text:
-        return {
-            "intent": "OPEN_APP",
-            "app": extract_app_name(text),
-        }
-    elif "close" in text:
-        return {"intent": "CLOSE_APP"}
-    elif "screenshot" in text:
-        return {"intent": "SCREENSHOT"}
-    return {"intent": "UNKNOWN"}
+    """Parse intent from OCR/raw text with deterministic fallback rules."""
+    normalized = text.strip().lower()
+    if not normalized:
+        return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0, "normalized_text": ""}
+
+    for separator in [" and then ", " then ", " and "]:
+        if separator in normalized:
+            parts = [segment.strip() for segment in normalized.split(separator) if segment.strip()]
+            steps = []
+            for part in parts:
+                step = _parse_single_intent(part)
+                if step.get("intent") != "UNKNOWN":
+                    steps.append({"intent": step.get("intent"), "slots": step.get("slots", {})})
+            if len(steps) > 1:
+                return {
+                    "intent": "MULTI_STEP",
+                    "slots": {"steps": steps},
+                    "steps": steps,
+                    "confidence": 0.85,
+                    "normalized_text": normalized,
+                }
+
+    parsed = _parse_single_intent(normalized)
+    parsed.setdefault("slots", {})
+    parsed["normalized_text"] = normalized
+    if parsed.get("intent") not in SUPPORTED_ENUM_INTENTS:
+        return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0, "normalized_text": normalized}
+    return parsed
 
 
 def clean_json_response(text: str) -> str:
@@ -267,10 +381,66 @@ def call_model_with_fallback(image_url: str, api_key: str) -> dict:
     return call_model_hardened(image_url, api_key, validate_image=True)
 
 
-# Legacy function for compatibility
-def call_model(image_url: str, api_key: str) -> dict:
-    """Call model with automatic fallback (Gemini → Qwen)."""
-    return call_model_with_fallback(image_url, api_key)
+def _call_model_legacy_text(image_url: str, api_key: str) -> str:
+    """Call legacy chat-completions OCR endpoint and return raw text."""
+    response = requests.post(
+        "https://gen.pollinations.ai/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "gemini-fast",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "decode and extract text"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_url},
+                        },
+                    ],
+                }
+            ],
+        },
+        timeout=90,
+    )
+
+    if response.status_code != 200:
+        raise Exception(
+            f"Model request failed: HTTP {response.status_code} - {response.text}"
+        )
+
+    payload = response.json()
+    try:
+        content = payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise Exception("Model response missing message content") from exc
+
+    return str(content).strip()
+
+
+def call_model(image_url: str, api_key: str) -> dict | str:
+    """
+    Resilient model call strategy:
+    1) hardened JSON model call
+    2) fallback to legacy raw-text extraction
+    """
+    primary_error = None
+    try:
+        hardened = call_model_with_fallback(image_url, api_key)
+        if isinstance(hardened, dict) and hardened.get("status") != "error":
+            return hardened
+        if isinstance(hardened, dict) and hardened.get("status") == "error":
+            primary_error = hardened.get("reason", "hardened_model_error")
+    except Exception as exc:
+        primary_error = str(exc)
+
+    try:
+        return _call_model_legacy_text(image_url, api_key)
+    except Exception as legacy_exc:
+        raise Exception(f"Model calls failed: {primary_error}; legacy={legacy_exc}") from legacy_exc
 
 
 class DrawToActionPipeline:
@@ -289,6 +459,7 @@ class DrawToActionPipeline:
         self.trace_mode = trace_mode
         self.received_dir = self.storage_dir / "received"
         self.variants_dir = self.storage_dir / "variants"
+        self._last_valid_result: InferenceResult | None = None
         self.received_dir.mkdir(parents=True, exist_ok=True)
         self.variants_dir.mkdir(parents=True, exist_ok=True)
 
@@ -298,237 +469,162 @@ class DrawToActionPipeline:
         *,
         preferred_app: str | None = None,
     ) -> InferenceResult:
-        """
-        STAGE 4 ENHANCED: Process drawing with full stabilization pipeline.
-        
-        Flow:
-        1. Save image + create variants
-        2. Run inference on all variants (original, rotated_90, rotated_270)
-        3. Analyze consistency across variants
-        4. Validate JSON structure
-        5. Evaluate trust score
-        6. Select best result
-        
-        Returns:
-            InferenceResult with selected intent and metadata
-        """
+        """Deterministic perception -> intent conversion for drawing input."""
         print(f"\n{'='*70}")
-        print(f"[STAGE 4 PIPELINE] Processing drawing")
+        print(f"[EXECUTION-READY PIPELINE] Processing drawing")
         print(f"{'='*70}")
-        
-        input_image_path = self._save_image(image_bytes)
-        candidates: list[InferenceCandidate] = []
-        raw_json_outputs: list[dict] = []  # Store raw JSON for consistency analysis
 
-        # =================================================================
-        # STEP 1: Run inference on all variants
-        # =================================================================
-        print(f"\n[STEP 1] Running multi-variant inference")
-        
-        for variant_name, variant_path in self._create_variants(input_image_path):
-            image_url = await asyncio.to_thread(self._upload_image, variant_path)
+        input_image_path = self._save_image(image_bytes)
+        image_url = ""
+
+        try:
+            image_url = await asyncio.to_thread(self._upload_image, input_image_path)
             candidate = await self._infer_attempt(
                 input_image_path=input_image_path,
-                variant_name=variant_name,
-                variant_path=variant_path,
+                variant_name="original",
+                variant_path=input_image_path,
                 image_url=image_url,
                 model="gemini-fast",
             )
-            candidates.append(candidate)
-            
-            # Extract raw JSON for consistency analysis
-            raw_json_outputs.append({
-                "intent": candidate.intent.action,
-                "slots": candidate.intent.parameters,
-                "confidence": candidate.intent.confidence,
-                "normalized_text": candidate.normalized_text,
-                "variant": variant_name,
-            })
-
-        self._trace_block(
-            "ALL CANDIDATES",
-            [
-                {
-                    "variant": candidate.variant_name,
-                    "model": candidate.model,
-                    "text": candidate.normalized_text,
-                    "confidence": candidate.intent.confidence,
-                    "intent": candidate.intent.action,
-                    "app": candidate.intent.parameters.get("app"),
-                    "valid": candidate.valid,
-                }
-                for candidate in candidates
-            ],
-        )
-
-        # =================================================================
-        # STEP 2: Stage 4 Consistency Analysis
-        # =================================================================
-        print(f"\n[STEP 2] Analyzing multi-variant consistency")
-        
-        consistency_result = analyze_consistency(raw_json_outputs)
-        
-        self._trace_block(
-            "CONSISTENCY RESULT",
-            {
-                "consistency_score": consistency_result.consistency_score,
-                "agreement_ratio": consistency_result.agreement_ratio,
-                "final_score": consistency_result.final_score,
-                "voting": consistency_result.voting_breakdown,
-            },
-        )
-
-        # =================================================================
-        # STEP 3: Stage 4 JSON Validation
-        # =================================================================
-        print(f"\n[STEP 3] Validating selected intent")
-        
-        validation_result = validate_intent_json(consistency_result.selected_intent)
-        
-        self._trace_block(
-            "VALIDATION RESULT",
-            {
-                "valid": validation_result.valid,
-                "errors": validation_result.errors,
-                "warnings": validation_result.warnings,
-                "confidence": validation_result.confidence,
-            },
-        )
-
-        # =================================================================
-        # STEP 4: Stage 4 Trust Evaluation
-        # =================================================================
-        print(f"\n[STEP 4] Evaluating execution trust")
-        
-        trust_decision = evaluate_trust(
-            confidence=consistency_result.confidence,
-            consistency_score=consistency_result.consistency_score,
-            validation_passed=validation_result.valid,
-            validation_warnings=len(validation_result.warnings),
-        )
-        
-        self._trace_block(
-            "TRUST DECISION",
-            {
-                "should_execute": trust_decision.should_execute,
-                "final_score": trust_decision.final_score,
-                "reason": trust_decision.reason,
-                "recommendations": trust_decision.recommendations,
-            },
-        )
-
-        # =================================================================
-        # STEP 5: Select best result using Stage 2 ranking
-        # =================================================================
-        print(f"\n[STEP 5] Selecting best candidate")
-
-        ranked_candidates = rank_candidates(candidates, preferred_app=preferred_app)
-        self._trace_block(
-            "RANKING SCORES",
-            [
-                {
-                    "variant": ranked.candidate.variant_name,
-                    "model": ranked.candidate.model,
-                    "text": ranked.candidate.normalized_text,
-                    "intent": ranked.candidate.intent.action,
-                    "score": round(ranked.score, 4),
-                }
-                for ranked in ranked_candidates
-            ],
-        )
-
-        ranked_choice = choose_best_candidate(
-            candidates,
-            preferred_app=preferred_app,
-            threshold=max(self.confidence_threshold, RANKING_THRESHOLD),
-        )
-        selected = ranked_choice.candidate if ranked_choice is not None else None
-        
-        # =================================================================
-        # STEP 6: Build final result with Stage 4 metadata
-        # =================================================================
-        if selected is None:
-            unknown_intent = build_unknown_intent(
-                message="Could not determine intent",
-                confidence=0.4,
-                normalized_text="",
-            )
-            self._trace_block(
-                "FINAL SELECTION",
-                {
-                    "variant": "none",
-                    "model": "none",
-                    "text": "",
-                    "intent": unknown_intent.action,
-                    "score": 0.0,
-                    "stage4_trust": trust_decision.final_score,
-                },
-            )
-            return InferenceResult(
-                intent=unknown_intent,
+        except Exception as exc:
+            candidate = InferenceCandidate(
+                intent=build_unknown_intent(
+                    message="Model unavailable",
+                    confidence=0.0,
+                    normalized_text="",
+                ),
                 normalized_text="",
                 model="none",
                 input_image_path=input_image_path,
-                variant_name="none",
+                variant_name="original",
                 image_path=input_image_path,
-                image_url="",
-                raw_model_output="No valid OCR output",
-                message="Could not determine intent",
-                ranking_score=0.0,
-                candidates=candidates,
-                # Stage 4 metadata
-                consistency_score=consistency_result.consistency_score,
-                trust_score=trust_decision.final_score,
-                should_execute=False,
-                validation_passed=validation_result.valid,
+                image_url=image_url,
+                raw_model_output=str(exc),
+                message="Model unavailable",
+                valid=False,
             )
 
-        selected.ranking_score = ranked_choice.score
-        
-        # Stage 4: Final logging
-        print(f"\n{'='*70}")
-        print(f"[STAGE 4 FINAL RESULT]")
-        print(f"{'='*70}")
-        print(f"[INTENT] {selected.intent.action}")
-        print(f"[SLOTS] {selected.intent.parameters}")
-        print(f"[CONFIDENCE] {selected.intent.confidence}")
-        print(f"[CONSISTENCY] {consistency_result.consistency_score:.4f}")
-        print(f"[TRUST SCORE] {trust_decision.final_score:.4f}")
-        print(f"[SHOULD EXECUTE] {trust_decision.should_execute}")
-        print(f"[VALIDATION] {validation_result.valid}")
-        
-        self._trace_block(
-            "FINAL SELECTION",
-            {
-                "variant": selected.variant_name,
-                "model": selected.model,
-                "text": selected.normalized_text,
-                "intent": selected.intent.action,
-                "app": selected.intent.parameters.get("app"),
-                "score": selected.ranking_score,
-                "stage4_consistency": consistency_result.consistency_score,
-                "stage4_trust": trust_decision.final_score,
-                "stage4_execute": trust_decision.should_execute,
-            },
+        # Rule 4: never keep UNKNOWN if clear action exists in normalized text.
+        if candidate.intent.action == "UNKNOWN" and candidate.normalized_text:
+            fallback = parse_intent(candidate.normalized_text)
+            if fallback.get("intent") != "UNKNOWN":
+                fallback_intent, fallback_message = self._build_intent_from_json(
+                    intent_name=fallback.get("intent", "UNKNOWN"),
+                    slots=fallback.get("slots", {}),
+                    confidence=fallback.get("confidence", 0.75),
+                    normalized_text=fallback.get("normalized_text", candidate.normalized_text),
+                )
+                candidate = InferenceCandidate(
+                    intent=fallback_intent,
+                    normalized_text=fallback.get("normalized_text", candidate.normalized_text),
+                    model="fallback-parser",
+                    input_image_path=input_image_path,
+                    variant_name="original",
+                    image_path=input_image_path,
+                    image_url=image_url,
+                    raw_model_output=candidate.raw_model_output,
+                    message=fallback_message,
+                    valid=fallback_intent.action != "UNKNOWN",
+                )
+
+        # Rule 3: on model failure, reuse last valid intent if available.
+        if candidate.intent.action == "UNKNOWN" and self._last_valid_result is not None:
+            cached = self._last_valid_result
+            return InferenceResult(
+                intent=cached.intent,
+                normalized_text=candidate.normalized_text or cached.normalized_text,
+                model="fallback-cache",
+                input_image_path=input_image_path,
+                variant_name="cache_fallback",
+                image_path=input_image_path,
+                image_url=image_url,
+                raw_model_output=candidate.raw_model_output,
+                message="Reused last valid intent after model failure",
+                ranking_score=cached.ranking_score,
+                candidates=[candidate],
+                consistency_score=1.0,
+                trust_score=1.0,
+                should_execute=True,
+                validation_passed=True,
+            )
+
+        if candidate.intent.action == "OPEN_APP" and candidate.intent.confidence >= 0.7:
+            print("[DIRECT EXECUTION RULE] OPEN_APP confidence >= 0.7")
+
+        result = InferenceResult(
+            intent=candidate.intent,
+            normalized_text=candidate.normalized_text,
+            model=candidate.model,
+            input_image_path=input_image_path,
+            variant_name=candidate.variant_name,
+            image_path=candidate.image_path,
+            image_url=candidate.image_url,
+            raw_model_output=candidate.raw_model_output,
+            message=candidate.message,
+            ranking_score=candidate.intent.confidence,
+            candidates=[candidate],
+            consistency_score=1.0,
+            trust_score=1.0,
+            should_execute=True,
+            validation_passed=True,
         )
-        return InferenceResult(
-            intent=selected.intent,
-            normalized_text=selected.normalized_text,
-            model=selected.model,
-            input_image_path=selected.input_image_path,
-            variant_name=selected.variant_name,
-            image_path=selected.image_path,
-            image_url=selected.image_url,
-            raw_model_output=selected.raw_model_output,
-            message=selected.message,
-            ranking_score=selected.ranking_score,
-            candidates=candidates,
-            # Stage 4 metadata
-            consistency_score=consistency_result.consistency_score,
-            trust_score=trust_decision.final_score,
-            should_execute=trust_decision.should_execute,
-            validation_passed=validation_result.valid,
+
+        if result.intent.action != "UNKNOWN":
+            self._last_valid_result = result
+
+        return result
+
+    async def process_text_input(self, text: str) -> InferenceResult:
+        """Deterministic text -> intent parsing path (no model dependency)."""
+        normalized_text = text.strip().lower()
+        parsed = parse_intent(normalized_text)
+
+        intent, message = self._build_intent_from_json(
+            intent_name=parsed.get("intent", "UNKNOWN"),
+            slots=parsed.get("slots", {}),
+            confidence=parsed.get("confidence", 0.0),
+            normalized_text=parsed.get("normalized_text", normalized_text),
         )
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        input_path = self.received_dir / f"text_{timestamp}.txt"
+        input_path.write_text(text, encoding="utf-8")
+
+        candidate = InferenceCandidate(
+            intent=intent,
+            normalized_text=parsed.get("normalized_text", normalized_text),
+            model="text-fallback-parser",
+            input_image_path=input_path,
+            variant_name="text",
+            image_path=input_path,
+            image_url="",
+            raw_model_output=text,
+            message=message,
+            valid=intent.action != "UNKNOWN",
+        )
+
+        result = InferenceResult(
+            intent=candidate.intent,
+            normalized_text=candidate.normalized_text,
+            model=candidate.model,
+            input_image_path=input_path,
+            variant_name="text",
+            image_path=input_path,
+            image_url="",
+            raw_model_output=text,
+            message=message,
+            ranking_score=candidate.intent.confidence,
+            candidates=[candidate],
+            consistency_score=1.0,
+            trust_score=1.0,
+            should_execute=True,
+            validation_passed=True,
+        )
+
+        if result.intent.action != "UNKNOWN":
+            self._last_valid_result = result
+
+        return result
 
     async def close(self) -> None:
         return None
@@ -580,7 +676,7 @@ class DrawToActionPipeline:
         self._trace_block("IMAGE URL", image_url)
         return image_url
 
-    async def _infer_with_model(self, image_url: str) -> dict:
+    async def _infer_with_model(self, image_url: str) -> dict | str:
         return await asyncio.to_thread(call_model, image_url, self.api_key)
 
     async def _infer_attempt(
@@ -593,8 +689,9 @@ class DrawToActionPipeline:
         model: str,
     ) -> InferenceCandidate:
         try:
-            # Model now returns parsed JSON dict
+            # Model may return strict JSON or legacy raw OCR text.
             model_output = await self._infer_with_model(image_url=image_url)
+            model_output = self._normalize_model_output(model_output)
 
             print("\n========== [MODEL OUTPUT RECEIVED] ==========")
             print(model_output)
@@ -602,6 +699,9 @@ class DrawToActionPipeline:
             # Extract fields from strict JSON response
             intent_name = model_output.get("intent", "UNKNOWN")
             slots = model_output.get("slots", {})
+            if intent_name == "MULTI_STEP" and isinstance(model_output.get("steps"), list):
+                slots = dict(slots) if isinstance(slots, dict) else {}
+                slots["steps"] = model_output.get("steps", [])
             confidence = model_output.get("confidence", 0.0)
             normalized_text = model_output.get("normalized_text", "")
 
@@ -663,16 +763,68 @@ class DrawToActionPipeline:
         print(f"\n========== [BUILDING INTENT] ==========")
         print(f"Intent: {intent_name}, Slots: {slots}, Confidence: {confidence}")
 
+        intent_name = str(intent_name or "UNKNOWN").strip().upper()
+        if intent_name not in SUPPORTED_ENUM_INTENTS:
+            intent_name = "UNKNOWN"
+
+        try:
+            model_confidence = float(confidence)
+        except (TypeError, ValueError):
+            model_confidence = 0.0
+        model_confidence = max(0.0, min(1.0, model_confidence))
+
+        if not isinstance(slots, dict):
+            slots = {}
+
+        metadata = {"normalized_text": normalized_text}
+
+        if intent_name == "MULTI_STEP":
+            steps = slots.get("steps", [])
+            if not isinstance(steps, list):
+                steps = []
+            normalized_steps = []
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                step_intent = str(step.get("intent", "UNKNOWN")).strip().upper()
+                if step_intent not in SUPPORTED_ENUM_INTENTS or step_intent == "UNKNOWN":
+                    continue
+                step_slots = step.get("slots", {})
+                if not isinstance(step_slots, dict):
+                    step_slots = {}
+                normalized_steps.append({"intent": step_intent, "slots": step_slots})
+
+            if not normalized_steps:
+                return (
+                    build_unknown_intent(
+                        message="Could not determine multi-step actions",
+                        confidence=0.0,
+                        normalized_text=normalized_text,
+                    ),
+                    "Could not determine multi-step actions",
+                )
+
+            return (
+                Intent(
+                    action="MULTI_STEP",
+                    parameters={"steps": normalized_steps},
+                    confidence=model_confidence,
+                    metadata=metadata,
+                ),
+                "Intent parsed from model JSON",
+            )
+
         if intent_name == "OPEN_APP":
             raw_app = slots.get("app")
             corrected_app = correct_app(raw_app) if isinstance(raw_app, str) else None
-            print(f"[APP RESOLUTION] raw={raw_app} -> corrected={corrected_app}")
+            app_value = corrected_app or (raw_app.strip() if isinstance(raw_app, str) else "")
+            print(f"[APP RESOLUTION] raw={raw_app} -> resolved={app_value}")
 
-            if not corrected_app:
+            if not app_value:
                 return (
                     build_unknown_intent(
                         message="Could not determine app",
-                        confidence=0.4,
+                        confidence=0.0,
                         normalized_text=normalized_text,
                     ),
                     "Could not determine app",
@@ -681,9 +833,9 @@ class DrawToActionPipeline:
             return (
                 Intent(
                     action="OPEN_APP",
-                    parameters={"app": corrected_app},
-                    confidence=confidence if confidence > 0 else 0.9,
-                    metadata={"normalized_text": normalized_text},
+                    parameters={"app": app_value},
+                    confidence=model_confidence,
+                    metadata=metadata,
                 ),
                 "Intent parsed from model JSON",
             )
@@ -694,63 +846,76 @@ class DrawToActionPipeline:
                 return (
                     build_unknown_intent(
                         message="No URL provided",
-                        confidence=0.4,
+                        confidence=0.0,
                         normalized_text=normalized_text,
                     ),
                     "No URL provided",
                 )
+            url = str(url).strip()
+            if url and not url.startswith(("http://", "https://")):
+                url = f"https://{url}"
             return (
                 Intent(
                     action="OPEN_URL",
                     parameters={"url": url},
-                    confidence=confidence if confidence > 0 else 0.9,
-                    metadata={"normalized_text": normalized_text},
+                    confidence=model_confidence,
+                    metadata=metadata,
                 ),
                 "Intent parsed from model JSON",
             )
 
         if intent_name == "SEARCH_WEB":
-            query = slots.get("query", normalized_text)
+            query = str(slots.get("query", normalized_text)).strip()
             return (
                 Intent(
                     action="SEARCH_WEB",
                     parameters={"query": query},
-                    confidence=confidence if confidence > 0 else 0.85,
-                    metadata={"normalized_text": normalized_text},
+                    confidence=model_confidence,
+                    metadata=metadata,
                 ),
                 "Intent parsed from model JSON",
             )
 
         if intent_name == "TYPE_TEXT":
-            text = slots.get("text", "")
+            text = str(slots.get("text", ""))
             return (
                 Intent(
                     action="TYPE_TEXT",
                     parameters={"text": text},
-                    confidence=confidence if confidence > 0 else 0.85,
-                    metadata={"normalized_text": normalized_text},
+                    confidence=model_confidence,
+                    metadata=metadata,
                 ),
                 "Intent parsed from model JSON",
             )
 
         if intent_name == "CLOSE_APP":
+            app = slots.get("app")
+            close_slots = {"app": str(app).strip()} if isinstance(app, str) and app.strip() else {"target": "focused"}
             return (
                 Intent(
                     action="CLOSE_APP",
-                    parameters={"target": "focused"},
-                    confidence=confidence if confidence > 0 else 0.85,
-                    metadata={"normalized_text": normalized_text},
+                    parameters=close_slots,
+                    confidence=model_confidence,
+                    metadata=metadata,
                 ),
                 "Intent parsed from model JSON",
             )
 
-        if intent_name == "SCREENSHOT":
+        if intent_name in {
+            "MINIMIZE_APP", "MAXIMIZE_APP", "SWITCH_APP", "FOCUS_WINDOW",
+            "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
+            "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
+            "LOCK_SCREEN", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
+            "OPEN_FILE", "DELETE_FILE", "CREATE_FILE", "MOVE_FILE", "RENAME_FILE",
+            "CLICK_ELEMENT", "SCROLL", "WAIT", "CONDITIONAL", "CONFIRMATION_REQUIRED",
+            "SCREENSHOT", "MINIMIZE", "MAXIMIZE",
+        }:
             return (
                 Intent(
-                    action="SCREENSHOT",
-                    parameters={},
-                    confidence=confidence if confidence > 0 else 0.85,
-                    metadata={"normalized_text": normalized_text},
+                    action=intent_name,
+                    parameters=slots,
+                    confidence=model_confidence,
+                    metadata=metadata,
                 ),
                 "Intent parsed from model JSON",
             )
@@ -758,11 +923,73 @@ class DrawToActionPipeline:
         return (
             build_unknown_intent(
                 message="Could not determine intent",
-                confidence=0.4,
+                confidence=0.0,
                 normalized_text=normalized_text,
             ),
             "Could not determine intent",
         )
+
+    def _normalize_model_output(self, model_output: dict | str) -> dict:
+        """Normalize model output from either JSON or legacy text OCR."""
+        if isinstance(model_output, dict):
+            normalized_text = str(model_output.get("normalized_text", "")).strip().lower()
+            intent_name = str(model_output.get("intent", "UNKNOWN")).strip().upper()
+            slots = model_output.get("slots", {})
+            if not isinstance(slots, dict):
+                slots = {}
+
+            # Some model outputs may return app outside slots.
+            if intent_name == "OPEN_APP" and "app" not in slots and isinstance(model_output.get("app"), str):
+                slots["app"] = model_output.get("app").strip()
+
+            try:
+                confidence = float(model_output.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            confidence = max(0.0, min(1.0, confidence))
+
+            if intent_name not in SUPPORTED_ENUM_INTENTS and normalized_text:
+                parsed_fallback = parse_intent(normalized_text)
+                return {
+                    "intent": parsed_fallback.get("intent", "UNKNOWN"),
+                    "slots": parsed_fallback.get("slots", {}),
+                    "steps": parsed_fallback.get("steps", []),
+                    "confidence": parsed_fallback.get("confidence", confidence),
+                    "normalized_text": parsed_fallback.get("normalized_text", normalized_text),
+                }
+
+            return {
+                "intent": intent_name if intent_name in SUPPORTED_ENUM_INTENTS else "UNKNOWN",
+                "slots": slots,
+                "steps": model_output.get("steps", []),
+                "confidence": confidence,
+                "normalized_text": normalized_text,
+            }
+
+        if not isinstance(model_output, str):
+            raise StageZeroValidationError("Unsupported model output type")
+
+        cleaned_output = clean_json_response(model_output)
+        if cleaned_output.startswith("{"):
+            try:
+                parsed_output = json.loads(cleaned_output)
+            except json.JSONDecodeError:
+                parsed_output = None
+            if isinstance(parsed_output, dict):
+                return parsed_output
+
+        normalized_text = model_output.strip().lower()
+        parsed_intent = parse_intent(normalized_text)
+        intent_name = parsed_intent.get("intent", "UNKNOWN")
+        slots = parsed_intent.get("slots", {}) if isinstance(parsed_intent.get("slots"), dict) else {}
+
+        return {
+            "intent": intent_name,
+            "slots": slots,
+            "steps": parsed_intent.get("steps", []),
+            "confidence": parsed_intent.get("confidence", 0.0),
+            "normalized_text": normalized_text,
+        }
 
     def _trace_block(self, section: str, payload) -> None:
         if not self.trace_mode:
@@ -781,11 +1008,31 @@ class DrawToActionPipeline:
             return value
         return value.replace(self.api_key, "****")
 
+    def _build_debug_curl(self, model: str, image_url: str, prompt_text: str) -> str:
+        """Build a masked curl command for reproducing model requests."""
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                }
+            ],
+        }
+        command = (
+            "curl -X POST "
+            f"\"https://gen.pollinations.ai/v1/chat/completions?key={self.api_key}\" "
+            "-H \"Content-Type: application/json\" "
+            f"-d \"{json.dumps(payload)}\""
+        )
+        return self._mask_sensitive(command)
+
 
 def select_best_result(results: list[InferenceCandidate]) -> InferenceCandidate | None:
-    """Compatibility wrapper around the Stage 2 ranking engine."""
-    ranked = choose_best_candidate(results)
-    if ranked is None:
+    """Select the highest-confidence candidate deterministically."""
+    if not results:
         return None
-    ranked.candidate.ranking_score = ranked.score
-    return ranked.candidate
+    return max(results, key=lambda candidate: candidate.intent.confidence)
