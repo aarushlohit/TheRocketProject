@@ -70,7 +70,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (!_announced) {
         _announced = true;
         widget.ttsService.speakOnce(
-          'Welcome to Rocket. Please select your accessibility needs. '
+          'Welcome to Rocket. Tell me how you want guidance. '
           'You can choose one or more options. Tap to select, double tap to continue.',
         );
       }
@@ -156,12 +156,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                     const SizedBox(height: AppTheme.spacingL),
                     const Text(
-                      'Choose Your\nAccessibility Needs',
+                      'Tell Rocket\nHow To Help',
                       style: AppTheme.headingLarge,
                     ),
                     const SizedBox(height: AppTheme.spacingS),
                     Text(
-                      'Select one or more options that apply to you',
+                      'Choose one or more options that match how you want to use the app',
                       style: AppTheme.bodyMedium.copyWith(
                         color: AppTheme.textMuted,
                       ),

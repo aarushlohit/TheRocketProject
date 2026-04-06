@@ -40,6 +40,10 @@ class FakePlatform:
     async def open_url(self, url: str) -> None:
         self.calls.append(("open_url", url))
 
+    async def lock_screen(self) -> dict:
+        self.calls.append(("lock_screen",))
+        return {"status": "success"}
+
     async def screenshot(self, output_dir: Path) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
         screenshot_path = output_dir / "shot.png"
@@ -161,3 +165,25 @@ def test_executor_does_not_block_when_availability_checker_false():
         assert platform.calls == [("open_app", "calculator")]
         assert result.status == "success"
         assert result.message == "Opened calculator"
+
+
+def test_executor_uses_dedicated_lock_screen():
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: True,
+        )
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="LOCK_SCREEN", parameters={}, confidence=0.95)
+            )
+        )
+
+        assert platform.calls == [("lock_screen",)]
+        assert result.status == "success"
+        assert result.message == "Locking system"

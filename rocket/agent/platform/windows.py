@@ -9,6 +9,7 @@ This ensures ALL Windows apps work, not just those in PATH.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -155,6 +156,35 @@ def resolve_app(app_name: str) -> Optional[str]:
 
 
 # =============================================================================
+# FOCUS APP UTILITY (PATCH 4)
+# =============================================================================
+
+def focus_app(name: str) -> bool:
+    """
+    Focus a window by partial title match.
+    
+    Improves shortcut reliability by ensuring the target app has focus.
+    """
+    try:
+        import pygetwindow as gw
+        windows = gw.getWindowsWithTitle(name)
+        for w in windows:
+            try:
+                w.activate()
+                time.sleep(0.3)  # Brief pause for focus
+                return True
+            except Exception:
+                continue
+        return False
+    except ImportError:
+        logger.warning("pygetwindow not installed - focus_app disabled")
+        return False
+    except Exception as e:
+        logger.error(f"focus_app failed: {e}")
+        return False
+
+
+# =============================================================================
 # HYBRID EXECUTION ENGINE
 # =============================================================================
 
@@ -275,6 +305,59 @@ def try_protocol_launch(app_name: str) -> bool:
 
 class WindowsAdapter(PlatformAdapter):
     """Windows-specific platform operations with HYBRID execution."""
+
+    async def lock_screen(self) -> dict:
+        """Lock the current Windows workstation deterministically.
+        
+        Uses multiple execution methods with fallback:
+        1. subprocess.run (preferred - synchronous, reliable)
+        2. ctypes.windll.user32.LockWorkStation (direct Windows API)
+        """
+        import platform
+        import ctypes
+        
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[LOCK_SCREEN] Platform: {platform.system()}")
+        
+        if platform.system() != "Windows":
+            print("[EXECUTION ERROR] Not running on Windows")
+            return {"status": "error", "error": "Not running on Windows"}
+        
+        # Method 1: subprocess.run (synchronous, reliable)
+        print("[EXECUTION] Attempting subprocess.run method...")
+        try:
+            result = subprocess.run(
+                ["rundll32.exe", "user32.dll,LockWorkStation"],
+                check=True,
+                shell=False,
+                capture_output=True,
+                timeout=5
+            )
+            print(f"[EXECUTION SUCCESS] subprocess completed, returncode={result.returncode}")
+            return {"status": "success", "method": "subprocess_rundll32"}
+        except subprocess.TimeoutExpired:
+            print("[EXECUTION WARNING] subprocess timed out, trying ctypes fallback...")
+        except subprocess.CalledProcessError as e:
+            print(f"[EXECUTION WARNING] subprocess failed: {e}, trying ctypes fallback...")
+        except Exception as e:
+            print(f"[EXECUTION WARNING] subprocess error: {e}, trying ctypes fallback...")
+        
+        # Method 2: ctypes direct Windows API call (most reliable)
+        print("[EXECUTION] Attempting ctypes.windll method...")
+        try:
+            result = ctypes.windll.user32.LockWorkStation()
+            if result:
+                print(f"[EXECUTION SUCCESS] ctypes LockWorkStation returned {result}")
+                return {"status": "success", "method": "ctypes_lockworkstation"}
+            else:
+                # Get last error for debugging
+                error_code = ctypes.get_last_error()
+                print(f"[EXECUTION ERROR] ctypes returned 0, GetLastError={error_code}")
+                return {"status": "error", "error": f"LockWorkStation returned 0, error={error_code}"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] ctypes failed: {e}")
+            logger.error(f"Failed to lock workstation: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def open_app(self, app_name: str) -> dict:
         """
@@ -405,7 +488,7 @@ class WindowsAdapter(PlatformAdapter):
         
         return {"status": "error", "query": query}
 
-    async def click(self, x: int, y: int, button: str = "left") -> dict:
+    async def click(self, x: int = None, y: int = None, button: str = "left") -> dict:
         """Click at position using pyautogui."""
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[CLICK] x={x}, y={y}, button={button}")
@@ -415,15 +498,62 @@ class WindowsAdapter(PlatformAdapter):
             return {"status": "error", "reason": "pyautogui_not_available"}
         
         try:
-            pyautogui.click(x, y, button=button)
-            print(f"[EXECUTION SUCCESS] Clicked at ({x}, {y})")
+            if x is not None and y is not None:
+                pyautogui.click(x, y, button=button)
+                print(f"[EXECUTION SUCCESS] Clicked at ({x}, {y})")
+            else:
+                # Click at current position
+                pyautogui.click(button=button)
+                print(f"[EXECUTION SUCCESS] Clicked at current position")
+            return {"status": "success", "x": x, "y": y, "button": button}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def double_click(self, x: int = None, y: int = None) -> dict:
+        """Double click at position using pyautogui."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[DOUBLE_CLICK] x={x}, y={y}")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            if x is not None and y is not None:
+                pyautogui.doubleClick(x, y)
+                print(f"[EXECUTION SUCCESS] Double-clicked at ({x}, {y})")
+            else:
+                pyautogui.doubleClick()
+                print(f"[EXECUTION SUCCESS] Double-clicked at current position")
             return {"status": "success", "x": x, "y": y}
         except Exception as e:
             print(f"[EXECUTION ERROR] {e}")
             return {"status": "error", "error": str(e)}
 
-    async def scroll(self, direction: str, amount: int = 3) -> dict:
-        """Scroll using pyautogui."""
+    async def right_click(self, x: int = None, y: int = None) -> dict:
+        """Right click at position using pyautogui."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[RIGHT_CLICK] x={x}, y={y}")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            if x is not None and y is not None:
+                pyautogui.rightClick(x, y)
+                print(f"[EXECUTION SUCCESS] Right-clicked at ({x}, {y})")
+            else:
+                pyautogui.rightClick()
+                print(f"[EXECUTION SUCCESS] Right-clicked at current position")
+            return {"status": "success", "x": x, "y": y}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def scroll(self, direction: str, amount: int = 500) -> dict:
+        """Scroll using pyautogui with proper scroll amounts."""
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[SCROLL] direction={direction}, amount={amount}")
         
@@ -432,10 +562,12 @@ class WindowsAdapter(PlatformAdapter):
             return {"status": "error", "reason": "pyautogui_not_available"}
         
         try:
-            clicks = amount if direction == "up" else -amount
-            pyautogui.scroll(clicks)
-            print(f"[EXECUTION SUCCESS] Scrolled {direction}")
-            return {"status": "success", "direction": direction}
+            # Use larger scroll amounts for visible effect
+            # Positive = scroll up, Negative = scroll down
+            scroll_amount = amount if direction.lower() == "up" else -amount
+            pyautogui.scroll(scroll_amount)
+            print(f"[EXECUTION SUCCESS] Scrolled {direction} by {abs(scroll_amount)}")
+            return {"status": "success", "direction": direction, "amount": scroll_amount}
         except Exception as e:
             print(f"[EXECUTION ERROR] {e}")
             return {"status": "error", "error": str(e)}
@@ -540,3 +672,217 @@ class WindowsAdapter(PlatformAdapter):
                 return {"status": "error", "error": str(e)}
         
         return {"status": "error", "reason": "pyautogui_not_available"}
+
+    # =========================================================================
+    # TEXT CONTROL SHORTCUTS (PATCH 5)
+    # =========================================================================
+
+    async def copy_text(self) -> dict:
+        """Copy selected text using Ctrl+C."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[COPY_TEXT]")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            pyautogui.hotkey("ctrl", "c")
+            print(f"[EXECUTION SUCCESS] Copied text")
+            return {"status": "success", "action": "copy"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def paste_text(self) -> dict:
+        """Paste text using Ctrl+V."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[PASTE_TEXT]")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            pyautogui.hotkey("ctrl", "v")
+            print(f"[EXECUTION SUCCESS] Pasted text")
+            return {"status": "success", "action": "paste"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def cut_text(self) -> dict:
+        """Cut selected text using Ctrl+X."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[CUT_TEXT]")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            pyautogui.hotkey("ctrl", "x")
+            print(f"[EXECUTION SUCCESS] Cut text")
+            return {"status": "success", "action": "cut"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def select_all(self) -> dict:
+        """Select all using Ctrl+A."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[SELECT_ALL]")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            pyautogui.hotkey("ctrl", "a")
+            print(f"[EXECUTION SUCCESS] Selected all")
+            return {"status": "success", "action": "select_all"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def undo(self) -> dict:
+        """Undo using Ctrl+Z."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[UNDO]")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            pyautogui.hotkey("ctrl", "z")
+            print(f"[EXECUTION SUCCESS] Undo")
+            return {"status": "success", "action": "undo"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def redo(self) -> dict:
+        """Redo using Ctrl+Y."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[REDO]")
+        
+        pyautogui = get_pyautogui()
+        if pyautogui is None:
+            return {"status": "error", "reason": "pyautogui_not_available"}
+        
+        try:
+            pyautogui.hotkey("ctrl", "y")
+            print(f"[EXECUTION SUCCESS] Redo")
+            return {"status": "success", "action": "redo"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    # =========================================================================
+    # VOLUME CONTROL (PATCH 4)
+    # =========================================================================
+
+    async def volume_up(self, amount: float = 0.1) -> dict:
+        """Increase system volume."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[VOLUME_UP] amount={amount}")
+        
+        try:
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            current = volume.GetMasterVolumeLevelScalar()
+            new_level = min(1.0, current + amount)
+            volume.SetMasterVolumeLevelScalar(new_level, None)
+            
+            print(f"[EXECUTION SUCCESS] Volume increased to {new_level:.0%}")
+            return {"status": "success", "volume": new_level, "action": "volume_up"}
+        except ImportError:
+            # Fallback to keyboard
+            pyautogui = get_pyautogui()
+            if pyautogui:
+                try:
+                    for _ in range(5):  # 5 presses for ~10% increase
+                        pyautogui.press("volumeup")
+                    print(f"[EXECUTION SUCCESS] Volume increased via keyboard")
+                    return {"status": "success", "action": "volume_up", "method": "keyboard"}
+                except Exception as e:
+                    return {"status": "error", "error": str(e)}
+            return {"status": "error", "reason": "pycaw_not_installed"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def volume_down(self, amount: float = 0.1) -> dict:
+        """Decrease system volume."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[VOLUME_DOWN] amount={amount}")
+        
+        try:
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            current = volume.GetMasterVolumeLevelScalar()
+            new_level = max(0.0, current - amount)
+            volume.SetMasterVolumeLevelScalar(new_level, None)
+            
+            print(f"[EXECUTION SUCCESS] Volume decreased to {new_level:.0%}")
+            return {"status": "success", "volume": new_level, "action": "volume_down"}
+        except ImportError:
+            # Fallback to keyboard
+            pyautogui = get_pyautogui()
+            if pyautogui:
+                try:
+                    for _ in range(5):
+                        pyautogui.press("volumedown")
+                    print(f"[EXECUTION SUCCESS] Volume decreased via keyboard")
+                    return {"status": "success", "action": "volume_down", "method": "keyboard"}
+                except Exception as e:
+                    return {"status": "error", "error": str(e)}
+            return {"status": "error", "reason": "pycaw_not_installed"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def volume_mute(self) -> dict:
+        """Toggle mute."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[VOLUME_MUTE]")
+        
+        try:
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            is_muted = volume.GetMute()
+            volume.SetMute(not is_muted, None)
+            
+            action = "unmuted" if is_muted else "muted"
+            print(f"[EXECUTION SUCCESS] Volume {action}")
+            return {"status": "success", "action": action}
+        except ImportError:
+            # Fallback to keyboard
+            pyautogui = get_pyautogui()
+            if pyautogui:
+                try:
+                    pyautogui.press("volumemute")
+                    print(f"[EXECUTION SUCCESS] Volume mute toggled via keyboard")
+                    return {"status": "success", "action": "mute_toggle", "method": "keyboard"}
+                except Exception as e:
+                    return {"status": "error", "error": str(e)}
+            return {"status": "error", "reason": "pycaw_not_installed"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}

@@ -12,7 +12,6 @@ import 'services/haptic_service.dart';
 import 'services/nova_socket_service.dart';
 import 'services/pairing_store.dart';
 import 'services/tts_service.dart';
-import 'widgets/confirmation_overlay.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -83,6 +82,10 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
     final savedPairing = await _store.load();
     final savedProfile = await _store.loadProfile();
     final onboardingDone = await _store.isOnboardingComplete();
+    _socketService.setLocalOnboardingState(
+      profile: savedProfile,
+      isOnboardingDone: onboardingDone,
+    );
 
     if (!mounted) return;
 
@@ -111,8 +114,14 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
       _appState = AppState.success;
     });
 
-    // Save profile
     _store.saveProfile(profile);
+    _socketService.setLocalOnboardingState(
+      profile: profile,
+      isOnboardingDone: true,
+    );
+    if (_pairingConfig != null) {
+      _socketService.sendOnboarding(profile.selectionIds, announce: false);
+    }
   }
 
   /// Called when success countdown finishes
@@ -172,37 +181,24 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
   }
 
   Widget _buildCurrentScreen() {
-    return Stack(
-      children: [
-        // Main screen based on state
-        switch (_appState) {
-          AppState.splash => SplashScreen(onComplete: _onSplashComplete),
-          AppState.onboarding => OnboardingScreen(
-              ttsService: _ttsService,
-              hapticService: _hapticService,
-              onComplete: _onOnboardingComplete,
-            ),
-          AppState.success => SuccessScreen(
-              ttsService: _ttsService,
-              hapticService: _hapticService,
-              onComplete: _onSuccessComplete,
-            ),
-          AppState.home => HomeScreen(
-              socketService: _socketService,
-              pairingConfig: _pairingConfig,
-              userProfile: _userProfile,
-              onPairingChanged: _updatePairing,
-            ),
-        },
-
-        // Confirmation overlay (always on top)
-        if (_appState == AppState.home &&
-            _socketService.pendingConfirmation != null)
-          ConfirmationOverlay(
-            socketService: _socketService,
-            request: _socketService.pendingConfirmation!,
-          ),
-      ],
-    );
+    return switch (_appState) {
+      AppState.splash => SplashScreen(onComplete: _onSplashComplete),
+      AppState.onboarding => OnboardingScreen(
+          ttsService: _ttsService,
+          hapticService: _hapticService,
+          onComplete: _onOnboardingComplete,
+        ),
+      AppState.success => SuccessScreen(
+          ttsService: _ttsService,
+          hapticService: _hapticService,
+          onComplete: _onSuccessComplete,
+        ),
+      AppState.home => HomeScreen(
+          socketService: _socketService,
+          pairingConfig: _pairingConfig,
+          userProfile: _userProfile,
+          onPairingChanged: _updatePairing,
+        ),
+    };
   }
 }

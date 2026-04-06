@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional
 
 from agent.core.result import Result
 from agent.core.execution_engine import ExecutionEngine, ExecutionResult
+from agent.core.feedback_manager import EventType, Priority, get_feedback_manager
 from agent.core.intelligent_pipeline import IntelligentPipeline, PipelineResult
 from agent.core.intent import Intent
 from agent.core.safety import pre_intent_safety_check, override_type_text_misuse
@@ -86,6 +87,7 @@ class NovaStageZeroAgent:
             self.pipeline_engine.set_websocket_callback(ws_callback)
         
         try:
+            await self._notify_feedback(EventType.MODEL_PROCESSING, "Analyzing drawing")
             # =================================================================
             # STEP 1: INFERENCE
             # =================================================================
@@ -119,12 +121,22 @@ class NovaStageZeroAgent:
                     "slots": inference.intent.parameters,
                 },
             )
+            await self._notify_feedback(
+                EventType.MODEL_SUCCESS,
+                f"{self._describe_intent(inference.intent.action, inference.intent.parameters)} detected",
+            )
 
             safety_intercept = pre_intent_safety_check(
                 inference.normalized_text,
                 getattr(self, "user_profile", None),
             )
             if safety_intercept is not None:
+                await self._notify_feedback(
+                    EventType.CONFIRMATION_REQUIRED,
+                    f"Triple tap in drawing canvas to confirm action "
+                    f"{self._describe_action_from_confirmation(safety_intercept)}",
+                    priority=Priority.CRITICAL,
+                )
                 payload = self._build_confirmation_request(
                     confirmation_payload=safety_intercept,
                     normalized_text=inference.normalized_text,
@@ -190,6 +202,12 @@ class NovaStageZeroAgent:
                 getattr(self, "user_profile", None),
             )
             if type_text_override is not None:
+                await self._notify_feedback(
+                    EventType.CONFIRMATION_REQUIRED,
+                    f"Triple tap in drawing canvas to confirm action "
+                    f"{self._describe_action_from_confirmation(type_text_override)}",
+                    priority=Priority.CRITICAL,
+                )
                 payload = self._build_confirmation_request(
                     confirmation_payload=type_text_override,
                     normalized_text=inference.normalized_text,
@@ -201,6 +219,10 @@ class NovaStageZeroAgent:
                 )
                 return payload
             
+            await self._notify_feedback(
+                EventType.EXECUTION_START,
+                f"Executing {self._describe_intent(inference.intent.action, inference.intent.parameters)}",
+            )
             result = await self.executor.execute(inference.intent)
 
             # Fallback: if deterministic path reports unsupported intent, try intelligent pipeline.
@@ -314,6 +336,7 @@ class NovaStageZeroAgent:
             self.pipeline_engine.set_websocket_callback(ws_callback)
 
         try:
+            await self._notify_feedback(EventType.MODEL_PROCESSING, "Processing command")
             inference = await self.pipeline.process_text_input(text)
 
             safety_intercept = pre_intent_safety_check(
@@ -321,12 +344,26 @@ class NovaStageZeroAgent:
                 getattr(self, "user_profile", None),
             )
             if safety_intercept is not None:
+                await self._notify_feedback(
+                    EventType.CONFIRMATION_REQUIRED,
+                    f"Triple tap in drawing canvas to confirm action "
+                    f"{self._describe_action_from_confirmation(safety_intercept)}",
+                    priority=Priority.CRITICAL,
+                )
                 return self._build_confirmation_request(
                     confirmation_payload=safety_intercept,
                     normalized_text=inference.normalized_text,
                     model=inference.model,
                 )
 
+            await self._notify_feedback(
+                EventType.MODEL_SUCCESS,
+                f"{self._describe_intent(inference.intent.action, inference.intent.parameters)} detected",
+            )
+            await self._notify_feedback(
+                EventType.EXECUTION_START,
+                f"Executing {self._describe_intent(inference.intent.action, inference.intent.parameters)}",
+            )
             result = await self.executor.execute(inference.intent)
             self._update_context(inference.intent.action, inference.intent.parameters, result)
             return self._build_mobile_response(
@@ -373,6 +410,10 @@ class NovaStageZeroAgent:
         slots = pending.get("slots", {})
         normalized_text = str(pending.get("normalized_text") or "")
         model = str(pending.get("model") or "confirmation")
+        await self._notify_feedback(
+            EventType.EXECUTION_START,
+            f"Executing {self._describe_intent(intent_name, slots if isinstance(slots, dict) else {})}",
+        )
 
         intent = Intent(
             action=intent_name,
@@ -419,6 +460,12 @@ class NovaStageZeroAgent:
 
     async def close(self) -> None:
         await self.pipeline.close()
+
+    def peek_pending_confirmation_id(self) -> Optional[str]:
+        """Return the most recent pending confirmation ID."""
+        if not self._pending_actions:
+            return None
+        return next(reversed(self._pending_actions))
 
     def _build_mobile_response(
         self,
@@ -574,3 +621,41 @@ class NovaStageZeroAgent:
         logger.info(f"## [{section}]")
         logger.info("========================================")
         logger.info(pformat(payload, sort_dicts=False))
+
+    async def _notify_feedback(
+        self,
+        event_type: EventType,
+        message: str,
+        *,
+        priority: Priority = Priority.NORMAL,
+    ) -> None:
+        """Send runtime stage feedback to the active client."""
+        feedback_mgr = get_feedback_manager()
+        if feedback_mgr:
+            await feedback_mgr.notify(event_type, message, priority)
+
+    def _describe_intent(self, intent_name: str, slots: dict) -> str:
+        """Return a voice-friendly description of an action."""
+        app_name = str(slots.get("app", "")).strip()
+        if intent_name == "OPEN_APP" and app_name:
+            return f"opening {app_name}"
+        if intent_name == "LOCK_SCREEN":
+            return "lock screen"
+        if intent_name == "OPEN_URL":
+            return "opening link"
+        if intent_name == "SEARCH_WEB":
+            return "web search"
+        cleaned = intent_name.replace("_", " ").strip().lower()
+        return cleaned or "command"
+
+    def _describe_action_from_confirmation(self, confirmation_payload: dict) -> str:
+        """Extract a feedback label from a confirmation payload."""
+        original_intent = (
+            confirmation_payload.get("original_intent")
+            or confirmation_payload.get("slots", {}).get("original_intent")
+            or "pending action"
+        )
+        original_slots = confirmation_payload.get("slots", {}).get("original_slots", {})
+        if not isinstance(original_slots, dict):
+            original_slots = {}
+        return self._describe_intent(str(original_intent), original_slots)

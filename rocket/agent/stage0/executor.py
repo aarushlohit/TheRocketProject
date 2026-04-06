@@ -252,15 +252,23 @@ class ActionExecutor:
                 return Result(status="success", message="Page refreshed")
 
             if action == "SCROLL_UP":
-                await self.platform.scroll("up", int(params.get("amount", 5)))
+                await self.platform.scroll("up", int(params.get("amount", 500)))
                 return Result(status="success", message="Scrolled up")
 
             if action == "SCROLL_DOWN":
-                await self.platform.scroll("down", int(params.get("amount", 5)))
+                await self.platform.scroll("down", int(params.get("amount", 500)))
                 return Result(status="success", message="Scrolled down")
 
             if action == "TYPE_TEXT":
                 text = str(params.get("text", ""))
+                
+                # PATCH 6: Semantic text generation
+                try:
+                    from agent.core.semantic_generator import process_type_text_semantic
+                    text = process_type_text_semantic(text)
+                except ImportError:
+                    pass  # Use original text if module not available
+                
                 result = await self.platform.type_text(text)
                 status = result.get("status", "success") if isinstance(result, dict) else "success"
                 if status == "error":
@@ -300,18 +308,37 @@ class ActionExecutor:
                 return Result(status="success", message=f"Pressed keys: {keys}")
 
             if action == "LOCK_SCREEN":
+                if hasattr(self.platform, "lock_screen"):
+                    result = await self.platform.lock_screen()
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        return Result(status="success", message="Locking system")
                 await self.platform.press_keys("win+l")
                 return Result(status="success", message="Screen locked")
 
             if action == "VOLUME_UP":
+                # PATCH 4: Use proper volume control if available
+                if hasattr(self.platform, 'volume_up'):
+                    result = await self.platform.volume_up()
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        return Result(status="success", message="Volume increased")
                 await self.platform.press_keys("volumeup")
                 return Result(status="success", message="Volume increased")
 
             if action == "VOLUME_DOWN":
+                # PATCH 4: Use proper volume control if available
+                if hasattr(self.platform, 'volume_down'):
+                    result = await self.platform.volume_down()
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        return Result(status="success", message="Volume decreased")
                 await self.platform.press_keys("volumedown")
                 return Result(status="success", message="Volume decreased")
 
             if action == "MUTE":
+                # PATCH 4: Use proper mute control if available
+                if hasattr(self.platform, 'volume_mute'):
+                    result = await self.platform.volume_mute()
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        return Result(status="success", message="Mute toggled")
                 await self.platform.press_keys("volumemute")
                 return Result(status="success", message="Mute toggled")
 

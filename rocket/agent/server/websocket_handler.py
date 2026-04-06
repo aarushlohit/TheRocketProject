@@ -286,6 +286,44 @@ async def handle_message(
         return
     
     # --------------------------------------------------------------------------
+    # TRIPLE TAP CONFIRM: Gesture-based confirmation (PATCH)
+    # --------------------------------------------------------------------------
+    if msg_type == "triple_tap_confirm":
+        print(f"[TRIPLE TAP CONFIRM] Received from {state.client_id}")
+        
+        handled = False
+        confirmation_id = data.get("confirmation_id")
+        
+        if hasattr(agent, "handle_confirmation_response"):
+            pending_id = confirmation_id
+            if not pending_id and hasattr(agent, "peek_pending_confirmation_id"):
+                pending_id = agent.peek_pending_confirmation_id()
+
+            if pending_id:
+                agent_response = await agent.handle_confirmation_response(pending_id, True)
+                if isinstance(agent_response, dict):
+                    await state.send(agent_response)
+                    handled = True
+        
+        if not handled:
+            confirmation_mgr = get_confirmation_manager()
+            if confirmation_mgr:
+                if confirmation_id:
+                    handled = confirmation_mgr.handle_response(confirmation_id, True)
+                else:
+                    for conf_id in list(confirmation_mgr._pending.keys()):
+                        handled = confirmation_mgr.handle_response(conf_id, True)
+                        if handled:
+                            break
+        
+        if not handled:
+            await state.send({
+                "type": "error",
+                "message": "No pending confirmation to confirm",
+            })
+        return
+    
+    # --------------------------------------------------------------------------
     # TEXT: Plain text command input
     # --------------------------------------------------------------------------
     if msg_type == "text":
