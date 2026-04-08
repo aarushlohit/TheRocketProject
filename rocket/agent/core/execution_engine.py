@@ -437,6 +437,7 @@ class ExecutionEngine:
         # Single intent handlers
         handlers = {
             "OPEN_APP": self._execute_open_app,
+            "FOCUS_APP": self._execute_focus_app,
             "OPEN_URL": self._execute_open_url,
             "SEARCH_WEB": self._execute_search_web,
             "TYPE_TEXT": self._execute_type_text,
@@ -445,6 +446,14 @@ class ExecutionEngine:
             "CLOSE_APP": self._execute_close_app,
             "MINIMIZE": self._execute_minimize,
             "MAXIMIZE": self._execute_maximize,
+            "MINIMIZE_APP": self._execute_minimize_app,
+            "MAXIMIZE_APP": self._execute_maximize_app,
+            "LOCK_SCREEN": self._execute_lock_screen,
+            "SHOW_DESKTOP": self._execute_show_desktop,
+            "VOLUME_UP": self._execute_volume_up,
+            "VOLUME_DOWN": self._execute_volume_down,
+            "UNDO": self._execute_undo,
+            "REDO": self._execute_redo,
         }
         
         handler = handlers.get(intent_type)
@@ -475,9 +484,9 @@ class ExecutionEngine:
                 confidence=confidence,
                 error_code="MISSING_APP",
             )
-        
+
         result = await self.platform.open_app(app)
-        
+
         if result.get("status") == "success":
             return ExecutionResult(
                 status="success",
@@ -494,6 +503,27 @@ class ExecutionEngine:
                 confidence=confidence,
                 error_code="OPEN_FAILED",
             )
+
+    async def _execute_focus_app(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute FOCUS_APP intent by opening or foregrounding the target app."""
+        app = slots.get("app", "")
+        if not app:
+            return ExecutionResult(
+                status="failed",
+                message="No app specified",
+                intent="FOCUS_APP",
+                confidence=confidence,
+                error_code="MISSING_APP",
+            )
+
+        result = await self.platform.open_app(app)
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message=f"Focused {app}" if result.get("status") == "success" else f"Failed to focus {app}",
+            intent="FOCUS_APP",
+            confidence=confidence,
+            data={"app": app},
+        )
     
     async def _execute_open_url(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute OPEN_URL intent."""
@@ -576,6 +606,16 @@ class ExecutionEngine:
                 confidence=confidence,
                 error_code="MISSING_KEYS",
             )
+
+        if "volume" in keys.lower():
+            print("[BLOCKED] volume via press_keys disabled")
+            return ExecutionResult(
+                status="failed",
+                message="Volume via PRESS_KEYS disabled",
+                intent="PRESS_KEYS",
+                confidence=confidence,
+                error_code="VOLUME_PRESS_KEYS_DISABLED",
+            )
         
         result = await self.platform.press_keys(keys)
         
@@ -624,7 +664,31 @@ class ExecutionEngine:
             intent="CLOSE_APP",
             confidence=confidence,
         )
-    
+
+    async def _execute_minimize_app(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute MINIMIZE_APP intent."""
+        app = slots.get("app")
+        result = await self.platform.minimize(app_name=app, target="focused")
+        label = app if app else "focused window"
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message=f"Minimized {label}",
+            intent="MINIMIZE_APP",
+            confidence=confidence,
+        )
+
+    async def _execute_maximize_app(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute MAXIMIZE_APP intent."""
+        app = slots.get("app")
+        result = await self.platform.maximize(app_name=app, target="focused")
+        label = app if app else "focused window"
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message=f"Maximized {label}",
+            intent="MAXIMIZE_APP",
+            confidence=confidence,
+        )
+
     async def _execute_minimize(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute MINIMIZE intent."""
         result = await self.platform.minimize()
@@ -642,6 +706,76 @@ class ExecutionEngine:
             status="success" if result.get("status") == "success" else "failed",
             message="Maximized window",
             intent="MAXIMIZE",
+            confidence=confidence,
+        )
+
+    async def _execute_lock_screen(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute LOCK_SCREEN intent."""
+        result = await self.platform.lock_screen()
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message="Locked screen" if result.get("status") == "success" else "Failed to lock screen",
+            intent="LOCK_SCREEN",
+            confidence=confidence,
+        )
+
+    async def _execute_show_desktop(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute SHOW_DESKTOP intent."""
+        result = await self.platform.press_keys("win+d")
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message="Showed desktop" if result.get("status") == "success" else "Failed to show desktop",
+            intent="SHOW_DESKTOP",
+            confidence=confidence,
+        )
+
+    async def _execute_volume_up(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute VOLUME_UP intent."""
+        value = max(0, min(100, int(slots.get("value", 5) or 5)))
+        print(f"[VOLUME ACTION] value={value}")
+        print(f"[VOLUME] UP by {abs(value)}%")
+        amount = value / 100.0
+        result = await self.platform.volume_up(amount)
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message="Volume increased" if result.get("status") == "success" else "Failed to increase volume",
+            intent="VOLUME_UP",
+            confidence=confidence,
+            data={"value": value},
+        )
+
+    async def _execute_volume_down(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute VOLUME_DOWN intent."""
+        value = max(0, min(100, int(slots.get("value", 5) or 5)))
+        print(f"[VOLUME ACTION] value={value}")
+        print(f"[VOLUME] DOWN by {abs(value)}%")
+        amount = value / 100.0
+        result = await self.platform.volume_down(amount)
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message="Volume decreased" if result.get("status") == "success" else "Failed to decrease volume",
+            intent="VOLUME_DOWN",
+            confidence=confidence,
+            data={"value": value},
+        )
+
+    async def _execute_undo(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute UNDO intent."""
+        result = await self.platform.press_keys("ctrl+z")
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message="Undo executed" if result.get("status") == "success" else "Failed to execute undo",
+            intent="UNDO",
+            confidence=confidence,
+        )
+
+    async def _execute_redo(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute REDO intent."""
+        result = await self.platform.press_keys("ctrl+y")
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message="Redo executed" if result.get("status") == "success" else "Failed to execute redo",
+            intent="REDO",
             confidence=confidence,
         )
     

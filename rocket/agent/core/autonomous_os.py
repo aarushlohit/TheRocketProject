@@ -39,6 +39,7 @@ class IntentEnum(str, Enum):
     # APP CONTROL (7)
     OPEN_APP = "OPEN_APP"
     CLOSE_APP = "CLOSE_APP"
+    FOCUS_APP = "FOCUS_APP"
     MINIMIZE_APP = "MINIMIZE_APP"
     MAXIMIZE_APP = "MAXIMIZE_APP"
     SWITCH_APP = "SWITCH_APP"
@@ -71,6 +72,7 @@ class IntentEnum(str, Enum):
     
     # SYSTEM CONTROL (10)
     LOCK_SCREEN = "LOCK_SCREEN"
+    SHOW_DESKTOP = "SHOW_DESKTOP"
     VOLUME_UP = "VOLUME_UP"
     VOLUME_DOWN = "VOLUME_DOWN"
     MUTE = "MUTE"
@@ -113,7 +115,7 @@ class IntentEnum(str, Enum):
 
 # Intent sets by category
 APP_CONTROL_INTENTS: Set[str] = {
-    "OPEN_APP", "CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP",
+    "OPEN_APP", "CLOSE_APP", "FOCUS_APP", "MINIMIZE_APP", "MAXIMIZE_APP",
     "SWITCH_APP", "FOCUS_WINDOW", "RESTART_APP"
 }
 
@@ -129,7 +131,7 @@ INPUT_CONTROL_INTENTS: Set[str] = {
 }
 
 SYSTEM_CONTROL_INTENTS: Set[str] = {
-    "LOCK_SCREEN", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "UNMUTE",
+    "LOCK_SCREEN", "SHOW_DESKTOP", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "UNMUTE",
     "BRIGHTNESS_UP", "BRIGHTNESS_DOWN", "SHUTDOWN", "RESTART_SYSTEM", "SLEEP"
 }
 
@@ -554,103 +556,172 @@ def check_type_text_safety_override(intent_data: Dict[str, Any]) -> Optional[Dic
 # INTENT CLASSIFICATION ENGINE
 # =============================================================================
 
-INTENT_PATTERNS: Dict[str, List[str]] = {
-    # App control
-    "OPEN_APP": [r"open\s+(\w+)", r"launch\s+(\w+)", r"start\s+(\w+)", r"run\s+(\w+)"],
-    "CLOSE_APP": [r"close\s+(\w+)?", r"exit\s+(\w+)?", r"quit\s+(\w+)?"],
-    "MINIMIZE_APP": [r"minimize", r"minimize\s+(\w+)"],
-    "MAXIMIZE_APP": [r"maximize", r"maximize\s+(\w+)"],
-    "SWITCH_APP": [r"switch\s+to\s+(\w+)", r"alt\s*tab"],
-    "RESTART_APP": [r"restart\s+(\w+)"],
-    
-    # Browser
-    "OPEN_URL": [r"go\s+to\s+(.+)", r"open\s+(https?://.+)", r"navigate\s+to\s+(.+)"],
-    "SEARCH_WEB": [r"search\s+(.+)", r"google\s+(.+)", r"find\s+(.+)"],
-    "NEW_TAB": [r"new\s+tab", r"open\s+tab"],
-    "CLOSE_TAB": [r"close\s+tab"],
-    "REFRESH_PAGE": [r"refresh", r"reload"],
-    "GO_BACK": [r"go\s+back", r"back"],
-    "GO_FORWARD": [r"go\s+forward", r"forward"],
-    "SCROLL_UP": [r"scroll\s+up"],
-    "SCROLL_DOWN": [r"scroll\s+down"],
-    "BOOKMARK_PAGE": [r"bookmark"],
-    
-    # Input
-    "TYPE_TEXT": [r"type\s+(.+)", r"write\s+(.+)", r"enter\s+(.+)"],
-    "COPY": [r"copy"],
-    "PASTE": [r"paste"],
-    "CUT": [r"cut"],
-    "UNDO": [r"undo"],
-    "REDO": [r"redo"],
-    "SELECT_TEXT": [r"select\s+all", r"select\s+(.+)"],
-    "CLEAR_TEXT": [r"clear", r"clear\s+text"],
-    "PRESS_KEYS": [r"press\s+(.+)", r"hotkey\s+(.+)"],
-    
-    # System
-    "LOCK_SCREEN": [r"lock\s+screen", r"lock"],
-    "SHUTDOWN": [r"shutdown", r"power\s+off", r"turn\s+off"],
-    "RESTART_SYSTEM": [r"restart\s+system", r"reboot"],
-    "SLEEP": [r"sleep", r"hibernate"],
-    "VOLUME_UP": [r"volume\s+up", r"increase\s+volume"],
-    "VOLUME_DOWN": [r"volume\s+down", r"decrease\s+volume"],
-    "MUTE": [r"mute"],
-    "UNMUTE": [r"unmute"],
-    "BRIGHTNESS_UP": [r"brightness\s+up", r"brighter"],
-    "BRIGHTNESS_DOWN": [r"brightness\s+down", r"dimmer"],
-    
-    # File
-    "OPEN_FILE": [r"open\s+file\s+(.+)"],
-    "DELETE_FILE": [r"delete\s+file\s+(.+)", r"remove\s+file\s+(.+)"],
-    "CREATE_FILE": [r"create\s+file\s+(.+)", r"new\s+file\s+(.+)"],
-    "MOVE_FILE": [r"move\s+(.+)\s+to\s+(.+)"],
-    "RENAME_FILE": [r"rename\s+(.+)\s+to\s+(.+)"],
-    "CREATE_FOLDER": [r"create\s+folder\s+(.+)", r"new\s+folder\s+(.+)"],
-    "DELETE_FOLDER": [r"delete\s+folder\s+(.+)", r"remove\s+folder\s+(.+)"],
-    "COPY_FILE": [r"copy\s+file\s+(.+)"],
-    "PASTE_FILE": [r"paste\s+file"],
-    
-    # UI
-    "CLICK_ELEMENT": [r"click\s+(.+)", r"tap\s+(.+)", r"press\s+(.+)\s+button"],
-    "DOUBLE_CLICK": [r"double\s+click\s+(.+)"],
-    "RIGHT_CLICK": [r"right\s+click\s+(.+)"],
-    "HOVER_ELEMENT": [r"hover\s+(.+)"],
-    "DRAG_AND_DROP": [r"drag\s+(.+)\s+to\s+(.+)"],
-    "SCROLL": [r"scroll"],
-    "WAIT": [r"wait\s*(\d+)?", r"pause\s*(\d+)?"],
-}
+VALID_INTENTS: List[str] = [
+    "OPEN_APP",
+    "CLOSE_APP",
+    "FOCUS_APP",
+    "MINIMIZE_APP",
+    "MAXIMIZE_APP",
+    "LOCK_SCREEN",
+    "SEARCH_WEB",
+    "TYPE_TEXT",
+    "VOLUME_UP",
+    "VOLUME_DOWN",
+    "UNDO",
+    "REDO",
+    "SHOW_DESKTOP",
+]
+
+
+def extract_app(text: str) -> Dict[str, Any]:
+    cleaned = re.sub(
+        r"\b(open|launch|start|run|close|focus|switch|to|minimize|maximize|app|application|window|please)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,!?:;")
+    return {"app": cleaned} if cleaned else {}
+
+
+def extract_percentage(text: str) -> Dict[str, Any]:
+    t = text.lower()
+
+    match = re.search(r"(\d+)", t)
+    if match:
+        return {"value": int(match.group(1))}
+
+    if "slight" in t or "slightly" in t or "a bit" in t or "little" in t:
+        return {"value": 5}
+
+    if "more" in t or "increase" in t:
+        return {"value": 10}
+
+    if "high" in t or "loud" in t:
+        return {"value": 15}
+
+    if "max" in t or "full" in t:
+        return {"value": 100}
+
+    if "low" in t or "reduce" in t:
+        return {"value": 5}
+
+    return {"value": 5}
+
+
+def clamp_volume(value: Any) -> int:
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return 5
+
+
+def extract_text_payload(text: str) -> Dict[str, Any]:
+    cleaned = re.sub(r"^(write|type|generate)\s+", "", text, flags=re.IGNORECASE).strip()
+    return {"text": cleaned or text}
+
+
+def infer_intent(text: str) -> tuple[str, Dict[str, Any]]:
+    t = text.lower().strip()
+
+    # FORCE VOLUME BEFORE ANYTHING ELSE
+    if "volume" in t:
+        value = clamp_volume(extract_percentage(t)["value"])
+
+        if "down" in t or "decrease" in t or "reduce" in t or "low" in t:
+            return "VOLUME_DOWN", {"value": value}
+
+        if (
+            "up" in t
+            or "increase" in t
+            or "more" in t
+            or "high" in t
+            or "loud" in t
+            or "max" in t
+            or "full" in t
+        ):
+            return "VOLUME_UP", {"value": value}
+
+    if t.startswith("delete file "):
+        return "DELETE_FILE", {"path": text[len("delete file "):].strip()}
+
+    if t.startswith("go to ") or t.startswith("navigate to ") or re.search(r"\bhttps?://", t):
+        target = re.sub(r"^(go to|navigate to)\s+", "", text, flags=re.IGNORECASE).strip()
+        return "OPEN_URL", {"url": target}
+
+    if t.startswith("press ") or t.startswith("hotkey "):
+        keys = re.sub(r"^(press|hotkey)\s+", "", t, flags=re.IGNORECASE).strip()
+        return "PRESS_KEYS", {"keys": keys}
+
+    # ---- SYSTEM ----
+    if "lock" in t:
+        return "LOCK_SCREEN", {}
+
+    if "minimize all" in t or "show desktop" in t:
+        return "SHOW_DESKTOP", {}
+
+    if "scroll down" in t:
+        return "SCROLL_DOWN", {}
+
+    if "scroll up" in t:
+        return "SCROLL_UP", {}
+
+    # ---- WINDOW ----
+    if "focus" in t:
+        return "FOCUS_APP", extract_app(t)
+
+    if "close" in t:
+        return "CLOSE_APP", extract_app(t)
+
+    if "minimize" in t:
+        return "MINIMIZE_APP", extract_app(t)
+
+    if "maximize" in t:
+        return "MAXIMIZE_APP", extract_app(t)
+
+    # ---- SHORTCUTS ----
+    if "undo" in t:
+        return "UNDO", {}
+
+    if "redo" in t:
+        return "REDO", {}
+
+    # ---- OPEN ----
+    if "open" in t or "launch" in t or "start" in t or "run" in t:
+        return "OPEN_APP", extract_app(t)
+
+    # ---- SEARCH ----
+    if "search" in t:
+        return "SEARCH_WEB", {"query": t.replace("search", "", 1).strip()}
+
+    # ---- TYPE ----
+    if "write" in t or "type" in t or "generate" in t:
+        return "TYPE_TEXT", extract_text_payload(text)
+
+    return "UNKNOWN", {}
 
 
 def classify_intent(input_text: str) -> Dict[str, Any]:
     """
-    Classify input text into an intent.
-    
-    Returns STRICT JSON output.
+    Classify input text into one deterministic intent.
     """
     if not input_text or not input_text.strip():
-        return {
-            "intent": "UNKNOWN",
-            "slots": {},
-            "confidence": 0.0
-        }
-    
-    text = input_text.lower().strip()
-    
-    for intent, patterns in INTENT_PATTERNS.items():
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                slots = extract_slots(intent, match, text)
-                return {
-                    "intent": intent,
-                    "slots": slots,
-                    "confidence": 0.9
-                }
-    
-    # No match found
+        print("[INPUT] ")
+        print("[INTENT] UNKNOWN")
+        print("[SLOTS] {}")
+        return {"intent": "UNKNOWN", "slots": {}, "confidence": 0.0}
+
+    intent, slots = infer_intent(input_text)
+    confidence = 0.95 if intent != "UNKNOWN" else 0.0
+
+    print(f"[INPUT] {input_text}")
+    print(f"[INTENT] {intent}")
+    print(f"[SLOTS] {slots}")
+
     return {
-        "intent": "UNKNOWN",
-        "slots": {"raw_input": input_text},
-        "confidence": 0.0
+        "intent": intent,
+        "slots": slots,
+        "confidence": confidence,
     }
 
 
@@ -720,6 +791,10 @@ def classify_multi_step(input_text: str) -> Dict[str, Any]:
     
     RULE: If multiple actions → MUST return MULTI_STEP with ordered steps.
     """
+    if "volume" in input_text.lower():
+        print("[BLOCKED] MULTI_STEP disabled for volume")
+        return classify_intent(input_text)
+
     if not detect_multi_step(input_text):
         return classify_intent(input_text)
     
@@ -998,6 +1073,9 @@ class AutonomousOSProcessor:
         try:
             if intent == "OPEN_APP":
                 result = await adapter.open_app(slots.get("app", ""))
+            elif intent == "FOCUS_APP":
+                app = slots.get("app")
+                result = await adapter.open_app(app) if app else {"status": "error", "reason": "missing_app"}
             elif intent == "OPEN_URL":
                 result = await adapter.open_url(slots.get("url", ""))
             elif intent == "SEARCH_WEB":
@@ -1005,13 +1083,32 @@ class AutonomousOSProcessor:
             elif intent == "TYPE_TEXT":
                 result = await adapter.type_text(slots.get("text", ""))
             elif intent == "PRESS_KEYS":
-                result = await adapter.press_keys(slots.get("keys", ""))
+                keys = slots.get("keys", "")
+                if "volume" in keys.lower():
+                    print("[BLOCKED] volume via press_keys disabled")
+                    result = {"status": "error", "reason": "volume_press_keys_disabled"}
+                else:
+                    result = await adapter.press_keys(keys)
             elif intent == "CLOSE_APP":
                 result = await adapter.close_app(slots.get("app"))
             elif intent == "MINIMIZE_APP":
                 result = await adapter.minimize(slots.get("app"))
             elif intent == "MAXIMIZE_APP":
                 result = await adapter.maximize(slots.get("app"))
+            elif intent == "LOCK_SCREEN":
+                result = await adapter.lock_screen()
+            elif intent == "SHOW_DESKTOP":
+                result = await adapter.press_keys("win+d")
+            elif intent == "VOLUME_UP":
+                value = clamp_volume(slots.get("value", 5))
+                print(f"[VOLUME ACTION] value={value}")
+                print(f"[VOLUME] UP by {abs(value)}%")
+                result = await adapter.volume_up(value / 100.0)
+            elif intent == "VOLUME_DOWN":
+                value = clamp_volume(slots.get("value", 5))
+                print(f"[VOLUME ACTION] value={value}")
+                print(f"[VOLUME] DOWN by {abs(value)}%")
+                result = await adapter.volume_down(value / 100.0)
             elif intent == "SCROLL_UP":
                 result = await adapter.scroll("up", 3)
             elif intent == "SCROLL_DOWN":
@@ -1023,7 +1120,11 @@ class AutonomousOSProcessor:
                     result = await adapter.press_keys(shortcut)
                 else:
                     result = {"status": "error", "reason": "no_shortcut"}
-            elif intent in ("COPY", "PASTE", "CUT", "UNDO", "REDO", "SELECT_TEXT"):
+            elif intent == "UNDO":
+                result = await adapter.press_keys("ctrl+z")
+            elif intent == "REDO":
+                result = await adapter.press_keys("ctrl+y")
+            elif intent in ("COPY", "PASTE", "CUT", "SELECT_TEXT"):
                 shortcut = get_keyboard_shortcut(intent.lower())
                 if shortcut:
                     result = await adapter.press_keys(shortcut)

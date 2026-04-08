@@ -192,6 +192,90 @@ def test_process_drawing_returns_unknown_for_unmatched_app(monkeypatch, tmp_path
     assert result.intent.parameters == {"app": "splunk"}
 
 
+def test_process_drawing_does_not_reuse_last_valid_intent_on_model_failure(monkeypatch, tmp_path):
+    calls = {"count": 0}
+
+    async def fake_infer_with_model(self, image_url):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return "open chrome\n"
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(DrawToActionPipeline, "_infer_with_model", fake_infer_with_model)
+    monkeypatch.setattr(
+        DrawToActionPipeline,
+        "_upload_image",
+        lambda self, image_path: "https://media.pollinations.ai/example.png",
+    )
+
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    first = asyncio.run(pipeline.process_drawing(_png_bytes()))
+    second = asyncio.run(pipeline.process_drawing(_png_bytes()))
+
+    assert first.intent.action == "OPEN_APP"
+    assert second.intent.action == "UNKNOWN"
+
+
+def test_process_text_input_uses_resolve_intent_not_multistep(tmp_path):
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("open chrome and search github"))
+
+    assert result.intent.action == "UNKNOWN"
+
+
+def test_normalize_model_output_ignores_model_intent_for_volume(tmp_path):
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    normalized = pipeline._normalize_model_output(
+        {
+            "intent": "PRESS_KEYS",
+            "slots": {"keys": "volumeup"},
+            "confidence": 0.9,
+            "normalized_text": "volume up more",
+        }
+    )
+
+    assert normalized["intent"] == "VOLUME_UP"
+    assert normalized["slots"] == {"value": 10}
+
+
+def test_normalize_model_output_blocks_model_multistep(tmp_path):
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    normalized = pipeline._normalize_model_output(
+        {
+            "intent": "MULTI_STEP",
+            "steps": [
+                {"intent": "OPEN_APP", "slots": {"app": "chrome"}},
+                {"intent": "SEARCH_WEB", "slots": {"query": "github"}},
+            ],
+            "confidence": 0.9,
+            "normalized_text": "open chrome and search github",
+        }
+    )
+
+    assert normalized["intent"] == "UNKNOWN"
+    assert normalized["slots"] == {}
+
+
 def test_validate_api_key_success(monkeypatch):
     class FakeResp:
         status_code = 200

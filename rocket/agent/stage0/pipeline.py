@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,6 +153,65 @@ SUPPORTED_ENUM_INTENTS = {
     "CLICK_ELEMENT", "SCROLL", "WAIT", "MULTI_STEP", "CONDITIONAL", "CONFIRMATION_REQUIRED", "UNKNOWN",
     "SCREENSHOT", "MINIMIZE", "MAXIMIZE",
 }
+
+
+def extract_percentage(text: str) -> dict:
+    lowered = text.lower()
+    match = re.search(r"(\d+)", lowered)
+    if match:
+        return {"value": int(match.group(1))}
+
+    if "slight" in lowered or "slightly" in lowered or "a bit" in lowered or "little" in lowered:
+        return {"value": 5}
+
+    if "more" in lowered or "increase" in lowered:
+        return {"value": 10}
+
+    if "high" in lowered or "loud" in lowered:
+        return {"value": 15}
+
+    if "max" in lowered or "full" in lowered:
+        return {"value": 100}
+
+    if "low" in lowered or "reduce" in lowered:
+        return {"value": 5}
+
+    return {"value": 5}
+
+
+def resolve_intent(text: str) -> tuple[str, dict]:
+    normalized = text.strip().lower()
+
+    print(f"[INPUT TEXT] {normalized}")
+
+    # ALWAYS FIRST
+    if "volume" in normalized:
+        value = extract_percentage(normalized)["value"]
+
+        if "up" in normalized or "increase" in normalized:
+            print("[RESOLVED INTENT] VOLUME_UP")
+            return "VOLUME_UP", {"value": value}
+
+        if "down" in normalized or "reduce" in normalized or "decrease" in normalized:
+            print("[RESOLVED INTENT] VOLUME_DOWN")
+            return "VOLUME_DOWN", {"value": value}
+
+    parsed = parse_intent(normalized)
+    intent = parsed.get("intent", "UNKNOWN")
+    slots = parsed.get("slots", {}) if isinstance(parsed.get("slots"), dict) else {}
+
+    if intent == "MULTI_STEP":
+        print("[BLOCKED] MULTI_STEP disabled")
+        print("[RESOLVED INTENT] UNKNOWN")
+        return "UNKNOWN", {}
+
+    if intent == "PRESS_KEYS" and "volume" in normalized:
+        print("[BLOCKED] Model tried PRESS_KEYS for volume")
+        print("[RESOLVED INTENT] UNKNOWN")
+        return "UNKNOWN", {}
+
+    print(f"[RESOLVED INTENT] {intent}")
+    return intent, slots
 
 
 def _parse_single_intent(text: str) -> dict:
@@ -504,50 +564,6 @@ class DrawToActionPipeline:
                 valid=False,
             )
 
-        # Rule 4: never keep UNKNOWN if clear action exists in normalized text.
-        if candidate.intent.action == "UNKNOWN" and candidate.normalized_text:
-            fallback = parse_intent(candidate.normalized_text)
-            if fallback.get("intent") != "UNKNOWN":
-                fallback_intent, fallback_message = self._build_intent_from_json(
-                    intent_name=fallback.get("intent", "UNKNOWN"),
-                    slots=fallback.get("slots", {}),
-                    confidence=fallback.get("confidence", 0.75),
-                    normalized_text=fallback.get("normalized_text", candidate.normalized_text),
-                )
-                candidate = InferenceCandidate(
-                    intent=fallback_intent,
-                    normalized_text=fallback.get("normalized_text", candidate.normalized_text),
-                    model="fallback-parser",
-                    input_image_path=input_image_path,
-                    variant_name="original",
-                    image_path=input_image_path,
-                    image_url=image_url,
-                    raw_model_output=candidate.raw_model_output,
-                    message=fallback_message,
-                    valid=fallback_intent.action != "UNKNOWN",
-                )
-
-        # Rule 3: on model failure, reuse last valid intent if available.
-        if candidate.intent.action == "UNKNOWN" and self._last_valid_result is not None:
-            cached = self._last_valid_result
-            return InferenceResult(
-                intent=cached.intent,
-                normalized_text=candidate.normalized_text or cached.normalized_text,
-                model="fallback-cache",
-                input_image_path=input_image_path,
-                variant_name="cache_fallback",
-                image_path=input_image_path,
-                image_url=image_url,
-                raw_model_output=candidate.raw_model_output,
-                message="Reused last valid intent after model failure",
-                ranking_score=cached.ranking_score,
-                candidates=[candidate],
-                consistency_score=1.0,
-                trust_score=1.0,
-                should_execute=True,
-                validation_passed=True,
-            )
-
         if candidate.intent.action == "OPEN_APP" and candidate.intent.confidence >= 0.7:
             print("[DIRECT EXECUTION RULE] OPEN_APP confidence >= 0.7")
 
@@ -577,13 +593,14 @@ class DrawToActionPipeline:
     async def process_text_input(self, text: str) -> InferenceResult:
         """Deterministic text -> intent parsing path (no model dependency)."""
         normalized_text = text.strip().lower()
-        parsed = parse_intent(normalized_text)
+        intent_name, slots = resolve_intent(normalized_text)
+        confidence = 0.85 if intent_name != "UNKNOWN" else 0.0
 
         intent, message = self._build_intent_from_json(
-            intent_name=parsed.get("intent", "UNKNOWN"),
-            slots=parsed.get("slots", {}),
-            confidence=parsed.get("confidence", 0.0),
-            normalized_text=parsed.get("normalized_text", normalized_text),
+            intent_name=intent_name,
+            slots=slots,
+            confidence=confidence,
+            normalized_text=normalized_text,
         )
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -592,8 +609,8 @@ class DrawToActionPipeline:
 
         candidate = InferenceCandidate(
             intent=intent,
-            normalized_text=parsed.get("normalized_text", normalized_text),
-            model="text-fallback-parser",
+            normalized_text=normalized_text,
+            model="text-resolver",
             input_image_path=input_path,
             variant_name="text",
             image_path=input_path,
@@ -933,14 +950,8 @@ class DrawToActionPipeline:
         """Normalize model output from either JSON or legacy text OCR."""
         if isinstance(model_output, dict):
             normalized_text = str(model_output.get("normalized_text", "")).strip().lower()
-            intent_name = str(model_output.get("intent", "UNKNOWN")).strip().upper()
-            slots = model_output.get("slots", {})
-            if not isinstance(slots, dict):
-                slots = {}
-
-            # Some model outputs may return app outside slots.
-            if intent_name == "OPEN_APP" and "app" not in slots and isinstance(model_output.get("app"), str):
-                slots["app"] = model_output.get("app").strip()
+            if not normalized_text and isinstance(model_output.get("text"), str):
+                normalized_text = str(model_output.get("text", "")).strip().lower()
 
             try:
                 confidence = float(model_output.get("confidence", 0.0))
@@ -948,20 +959,22 @@ class DrawToActionPipeline:
                 confidence = 0.0
             confidence = max(0.0, min(1.0, confidence))
 
-            if intent_name not in SUPPORTED_ENUM_INTENTS and normalized_text:
-                parsed_fallback = parse_intent(normalized_text)
-                return {
-                    "intent": parsed_fallback.get("intent", "UNKNOWN"),
-                    "slots": parsed_fallback.get("slots", {}),
-                    "steps": parsed_fallback.get("steps", []),
-                    "confidence": parsed_fallback.get("confidence", confidence),
-                    "normalized_text": parsed_fallback.get("normalized_text", normalized_text),
-                }
+            # IGNORE MODEL INTENT COMPLETELY
+            intent_name = None
+            slots = {}
+            _ = intent_name, slots
+
+            final_intent = "UNKNOWN"
+            final_slots: dict = {}
+            if normalized_text:
+                final_intent, final_slots = resolve_intent(normalized_text)
+
+            print(f"[FINAL INTENT LOCKED] {final_intent}")
 
             return {
-                "intent": intent_name if intent_name in SUPPORTED_ENUM_INTENTS else "UNKNOWN",
-                "slots": slots,
-                "steps": model_output.get("steps", []),
+                "intent": final_intent if final_intent in SUPPORTED_ENUM_INTENTS else "UNKNOWN",
+                "slots": final_slots,
+                "steps": [],
                 "confidence": confidence,
                 "normalized_text": normalized_text,
             }
@@ -976,18 +989,17 @@ class DrawToActionPipeline:
             except json.JSONDecodeError:
                 parsed_output = None
             if isinstance(parsed_output, dict):
-                return parsed_output
+                return self._normalize_model_output(parsed_output)
 
         normalized_text = model_output.strip().lower()
-        parsed_intent = parse_intent(normalized_text)
-        intent_name = parsed_intent.get("intent", "UNKNOWN")
-        slots = parsed_intent.get("slots", {}) if isinstance(parsed_intent.get("slots"), dict) else {}
+        intent_name, slots = resolve_intent(normalized_text)
+        print(f"[FINAL INTENT LOCKED] {intent_name}")
 
         return {
             "intent": intent_name,
             "slots": slots,
-            "steps": parsed_intent.get("steps", []),
-            "confidence": parsed_intent.get("confidence", 0.0),
+            "steps": [],
+            "confidence": 0.85 if intent_name != "UNKNOWN" else 0.0,
             "normalized_text": normalized_text,
         }
 

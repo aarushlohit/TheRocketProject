@@ -110,6 +110,30 @@ class TestIntentClassification:
         """Test CLOSE_APP intent."""
         result = classify_intent("close notepad")
         assert result["intent"] == "CLOSE_APP"
+
+    def test_volume_up_a_bit(self):
+        """Test natural-language volume increase."""
+        result = classify_intent("volume up a bit")
+        assert result["intent"] == "VOLUME_UP"
+        assert result["slots"]["value"] == 5
+
+    def test_volume_down_slightly(self):
+        """Test natural-language volume decrease."""
+        result = classify_intent("volume down slightly")
+        assert result["intent"] == "VOLUME_DOWN"
+        assert result["slots"]["value"] == 5
+
+    def test_volume_full(self):
+        """Test implicit max volume intent."""
+        result = classify_intent("volume full")
+        assert result["intent"] == "VOLUME_UP"
+        assert result["slots"]["value"] == 100
+
+    def test_reduce_volume(self):
+        """Test reduce volume maps down."""
+        result = classify_intent("reduce volume")
+        assert result["intent"] == "VOLUME_DOWN"
+        assert result["slots"]["value"] == 5
     
     def test_unknown_intent(self):
         """Test unknown input returns UNKNOWN."""
@@ -254,6 +278,12 @@ class TestMultiStepDetection:
         assert steps[0]["intent"] == "OPEN_APP"
         assert steps[1]["intent"] == "SEARCH_WEB"
         assert steps[2]["intent"] == "SCROLL_DOWN"
+
+    def test_volume_bypasses_multi_step(self):
+        """Test volume commands never become MULTI_STEP."""
+        result = classify_multi_step("volume up and then volume down")
+        assert result["intent"] in {"VOLUME_UP", "VOLUME_DOWN"}
+        assert "steps" not in result
 
 
 # =============================================================================

@@ -301,6 +301,13 @@ class ActionExecutor:
                 if isinstance(keys, list):
                     keys = "+".join(str(k) for k in keys if k)
                 keys = str(keys)
+                if "volume" in keys.lower():
+                    print("[BLOCKED] Model tried PRESS_KEYS for volume")
+                    return Result(
+                        status="error",
+                        message="Volume via PRESS_KEYS disabled",
+                        error_code="VOLUME_PRESS_KEYS_DISABLED",
+                    )
                 result = await self.platform.press_keys(keys)
                 status = result.get("status", "success") if isinstance(result, dict) else "success"
                 if status == "error":
@@ -316,18 +323,20 @@ class ActionExecutor:
                 return Result(status="success", message="Screen locked")
 
             if action == "VOLUME_UP":
-                # PATCH 4: Use proper volume control if available
+                value = max(0, min(100, int(params.get("value", 5) or 5)))
+                print(f"[VOLUME ACTION] value={value}")
                 if hasattr(self.platform, 'volume_up'):
-                    result = await self.platform.volume_up()
+                    result = await self.platform.volume_up(value / 100.0)
                     if isinstance(result, dict) and result.get("status") == "success":
                         return Result(status="success", message="Volume increased")
                 await self.platform.press_keys("volumeup")
                 return Result(status="success", message="Volume increased")
 
             if action == "VOLUME_DOWN":
-                # PATCH 4: Use proper volume control if available
+                value = max(0, min(100, int(params.get("value", 5) or 5)))
+                print(f"[VOLUME ACTION] value={value}")
                 if hasattr(self.platform, 'volume_down'):
-                    result = await self.platform.volume_down()
+                    result = await self.platform.volume_down(value / 100.0)
                     if isinstance(result, dict) and result.get("status") == "success":
                         return Result(status="success", message="Volume decreased")
                 await self.platform.press_keys("volumedown")
