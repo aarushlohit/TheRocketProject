@@ -14,7 +14,7 @@ class TestIntentSystem:
         """Verify the expanded Stage 5.6 intent count."""
         from agent.core.intent_system import VALID_INTENTS
 
-        assert len(VALID_INTENTS) == 67
+        assert len(VALID_INTENTS) == 68
 
     def test_app_control_intents(self):
         """Verify app control intents."""
@@ -75,6 +75,7 @@ class TestIntentSystem:
         expected = {
             "LOCK_SCREEN",
             "MINIMIZE_ALL",
+            "MAXIMIZE_ALL",
             "SHUTDOWN",
             "RESTART_SYSTEM",
             "SLEEP",
@@ -181,6 +182,7 @@ class TestIntentSystem:
 
         assert is_system_intent("VOLUME_UP") is True
         assert is_system_intent("MINIMIZE_ALL") is True
+        assert is_system_intent("MAXIMIZE_ALL") is True
         assert is_system_intent("MUTE") is True
         assert is_system_intent("UNMUTE") is True
         assert is_system_intent("BRIGHTNESS_DOWN") is True

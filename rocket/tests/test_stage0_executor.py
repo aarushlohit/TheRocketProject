@@ -298,3 +298,28 @@ def test_executor_routes_minimize_all(monkeypatch):
         assert platform.calls == []
         assert result.status == "success"
         assert result.message == "All windows minimized"
+
+
+def test_executor_routes_maximize_all(monkeypatch):
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: True,
+        )
+
+        monkeypatch.setattr(stage0_executor, "maximize_all_windows", lambda: 3)
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="MAXIMIZE_ALL", parameters={}, confidence=0.95)
+            )
+        )
+
+        assert platform.calls == []
+        assert result.status == "success"
+        assert result.message == "All windows maximized"
+        assert result.data["affected_windows"] == 3

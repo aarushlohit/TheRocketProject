@@ -14,6 +14,7 @@ from agent.core.intent import Intent
 from agent.core.result import Result
 from agent.core.safety import full_validation, validate_intent, requires_confirmation
 from agent.platform.audio_control import mute, unmute
+from agent.platform.window_control import maximize_all_windows
 from agent.platform.adapter import PlatformAdapter
 from agent.utils.logger import get_logger
 
@@ -350,6 +351,13 @@ class ActionExecutor:
             if action in {"MINIMIZE_ALL", "SHOW_DESKTOP"}:
                 minimize_all_windows()
                 return Result(status="success", message="All windows minimized")
+
+            if action == "MAXIMIZE_ALL":
+                print("[WINDOW CONTROL] MAXIMIZE ALL")
+                affected = maximize_all_windows()
+                if affected <= 0:
+                    return Result(status="error", message="No visible windows maximized", error_code="MAXIMIZE_ALL_FAILED")
+                return Result(status="success", message="All windows maximized", data={"affected_windows": affected})
 
             if action == "VOLUME_UP":
                 value = max(0, min(100, int(params.get("value", 5) or 5)))

@@ -79,6 +79,7 @@ INTENT_VERIFICATION_MAP: Dict[str, VerificationStrategy] = {
     # System
     "LOCK_SCREEN": VerificationStrategy.STATE_CHECK,
     "MINIMIZE_ALL": VerificationStrategy.STATE_CHECK,
+    "MAXIMIZE_ALL": VerificationStrategy.STATE_CHECK,
     "MUTE": VerificationStrategy.STATE_CHECK,
     "UNMUTE": VerificationStrategy.STATE_CHECK,
     "VOLUME_UP": VerificationStrategy.NONE,

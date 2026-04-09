@@ -42,6 +42,30 @@ def maximize_window(process_name: str | None = None) -> int:
     return len(hwnds)
 
 
+def maximize_all_windows() -> int:
+    count = 0
+
+    def callback(hwnd: int, _) -> bool:
+        nonlocal count
+        if not win32gui.IsWindowVisible(hwnd):
+            return True
+
+        title = win32gui.GetWindowText(hwnd)
+        if not title or not title.strip():
+            return True
+
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+            count += 1
+        except Exception:
+            pass
+
+        return True
+
+    win32gui.EnumWindows(callback, None)
+    return count
+
+
 def minimize_window(process_name: str | None = None) -> int:
     hwnds = _resolve_hwnds(process_name)
     for hwnd in hwnds:

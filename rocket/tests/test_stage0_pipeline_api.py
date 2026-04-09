@@ -306,6 +306,18 @@ def test_process_text_input_resolves_minimize_all(tmp_path):
     assert result.intent.action == "MINIMIZE_ALL"
 
 
+def test_process_text_input_resolves_maximize_all(tmp_path):
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("maximize everything"))
+
+    assert result.intent.action == "MAXIMIZE_ALL"
+
+
 def test_validate_api_key_success(monkeypatch):
     class FakeResp:
         status_code = 200

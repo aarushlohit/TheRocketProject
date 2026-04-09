@@ -62,6 +62,7 @@ from agent.core.confirmation_system import (
 )
 from agent.core.execution_verifier import verify_execution
 from agent.platform.audio_control import mute as mute_system_audio, unmute as unmute_system_audio
+from agent.platform.window_control import maximize_all_windows
 from agent.platform.adapter import PlatformAdapter
 from agent.utils.logger import get_logger
 
@@ -462,6 +463,7 @@ class ExecutionEngine:
             "RESTORE_APP": self._execute_restore_app,
             "LOCK_SCREEN": self._execute_lock_screen,
             "MINIMIZE_ALL": self._execute_minimize_all,
+            "MAXIMIZE_ALL": self._execute_maximize_all,
             "SHOW_DESKTOP": self._execute_show_desktop,
             "VOLUME_UP": self._execute_volume_up,
             "VOLUME_DOWN": self._execute_volume_down,
@@ -785,6 +787,35 @@ class ExecutionEngine:
                 intent="SHOW_DESKTOP",
                 confidence=confidence,
                 error_code="SHOW_DESKTOP_FAILED",
+            )
+
+    async def _execute_maximize_all(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute MAXIMIZE_ALL intent."""
+        try:
+            print("[WINDOW CONTROL] MAXIMIZE ALL")
+            affected = maximize_all_windows()
+            if affected <= 0:
+                return ExecutionResult(
+                    status="failed",
+                    message="No visible windows maximized",
+                    intent="MAXIMIZE_ALL",
+                    confidence=confidence,
+                    error_code="MAXIMIZE_ALL_FAILED",
+                )
+            return ExecutionResult(
+                status="success",
+                message="All windows maximized",
+                intent="MAXIMIZE_ALL",
+                confidence=confidence,
+                data={"affected_windows": affected},
+            )
+        except Exception as e:
+            return ExecutionResult(
+                status="failed",
+                message=f"Failed to maximize all windows: {e}",
+                intent="MAXIMIZE_ALL",
+                confidence=confidence,
+                error_code="MAXIMIZE_ALL_FAILED",
             )
 
     async def _execute_volume_up(self, slots: dict, confidence: float) -> ExecutionResult:
