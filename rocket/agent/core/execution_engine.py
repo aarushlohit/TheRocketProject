@@ -448,6 +448,7 @@ class ExecutionEngine:
             "MAXIMIZE": self._execute_maximize,
             "MINIMIZE_APP": self._execute_minimize_app,
             "MAXIMIZE_APP": self._execute_maximize_app,
+            "RESTORE_APP": self._execute_restore_app,
             "LOCK_SCREEN": self._execute_lock_screen,
             "SHOW_DESKTOP": self._execute_show_desktop,
             "VOLUME_UP": self._execute_volume_up,
@@ -668,6 +669,7 @@ class ExecutionEngine:
     async def _execute_minimize_app(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute MINIMIZE_APP intent."""
         app = slots.get("app")
+        print(f"[WINDOW CONTROL] MINIMIZE_APP -> {slots}")
         result = await self.platform.minimize(app_name=app, target="focused")
         label = app if app else "focused window"
         return ExecutionResult(
@@ -680,12 +682,26 @@ class ExecutionEngine:
     async def _execute_maximize_app(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute MAXIMIZE_APP intent."""
         app = slots.get("app")
+        print(f"[WINDOW CONTROL] MAXIMIZE_APP -> {slots}")
         result = await self.platform.maximize(app_name=app, target="focused")
         label = app if app else "focused window"
         return ExecutionResult(
             status="success" if result.get("status") == "success" else "failed",
             message=f"Maximized {label}",
             intent="MAXIMIZE_APP",
+            confidence=confidence,
+        )
+
+    async def _execute_restore_app(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute RESTORE_APP intent."""
+        app = slots.get("app")
+        print(f"[WINDOW CONTROL] RESTORE_APP -> {slots}")
+        result = await self.platform.restore(app_name=app, target="focused")
+        label = app if app else "focused window"
+        return ExecutionResult(
+            status="success" if result.get("status") == "success" else "failed",
+            message=f"Restored {label}",
+            intent="RESTORE_APP",
             confidence=confidence,
         )
 

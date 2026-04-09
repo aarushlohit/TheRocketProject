@@ -11,4 +11,6 @@ websockets==16.0
 
 # Stage 1.5 - Automation & Accessibility
 pyautogui==0.9.54
+psutil==7.1.0
+pywin32==311
 pyttsx3==2.98

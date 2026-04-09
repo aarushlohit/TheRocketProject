@@ -135,6 +135,12 @@ def test_parse_intent_close():
     assert parsed["slots"] == {"app": "window"}
 
 
+def test_parse_intent_restore():
+    parsed = parse_intent("restore window")
+    assert parsed["intent"] == "RESTORE_APP"
+    assert parsed["slots"] == {}
+
+
 def test_parse_intent_screenshot():
     parsed = parse_intent("take screenshot now")
     assert parsed["intent"] == "SCREENSHOT"

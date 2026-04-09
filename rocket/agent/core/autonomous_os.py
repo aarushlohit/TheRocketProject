@@ -42,6 +42,7 @@ class IntentEnum(str, Enum):
     FOCUS_APP = "FOCUS_APP"
     MINIMIZE_APP = "MINIMIZE_APP"
     MAXIMIZE_APP = "MAXIMIZE_APP"
+    RESTORE_APP = "RESTORE_APP"
     SWITCH_APP = "SWITCH_APP"
     FOCUS_WINDOW = "FOCUS_WINDOW"
     RESTART_APP = "RESTART_APP"
@@ -115,7 +116,7 @@ class IntentEnum(str, Enum):
 
 # Intent sets by category
 APP_CONTROL_INTENTS: Set[str] = {
-    "OPEN_APP", "CLOSE_APP", "FOCUS_APP", "MINIMIZE_APP", "MAXIMIZE_APP",
+    "OPEN_APP", "CLOSE_APP", "FOCUS_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP",
     "SWITCH_APP", "FOCUS_WINDOW", "RESTART_APP"
 }
 
@@ -575,7 +576,7 @@ VALID_INTENTS: List[str] = [
 
 def extract_app(text: str) -> Dict[str, Any]:
     cleaned = re.sub(
-        r"\b(open|launch|start|run|close|focus|switch|to|minimize|maximize|app|application|window|please)\b",
+        r"\b(open|launch|start|run|close|focus|switch|to|minimize|maximize|restore|app|application|window|please)\b",
         " ",
         text,
         flags=re.IGNORECASE,
@@ -679,6 +680,9 @@ def infer_intent(text: str) -> tuple[str, Dict[str, Any]]:
     if "maximize" in t:
         return "MAXIMIZE_APP", extract_app(t)
 
+    if "restore" in t:
+        return "RESTORE_APP", extract_app(t)
+
     # ---- SHORTCUTS ----
     if "undo" in t:
         return "UNDO", {}
@@ -751,7 +755,7 @@ def extract_slots(intent: str, match, text: str) -> Dict[str, Any]:
         slots["target"] = groups[0]
     elif intent == "WAIT" and groups and groups[0]:
         slots["seconds"] = int(groups[0])
-    elif intent in ("MINIMIZE_APP", "MAXIMIZE_APP", "SWITCH_APP", "RESTART_APP") and groups and groups[0]:
+    elif intent in ("MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SWITCH_APP", "RESTART_APP") and groups and groups[0]:
         slots["app"] = groups[0]
     
     return slots
@@ -1095,6 +1099,8 @@ class AutonomousOSProcessor:
                 result = await adapter.minimize(slots.get("app"))
             elif intent == "MAXIMIZE_APP":
                 result = await adapter.maximize(slots.get("app"))
+            elif intent == "RESTORE_APP":
+                result = await adapter.restore(slots.get("app"))
             elif intent == "LOCK_SCREEN":
                 result = await adapter.lock_screen()
             elif intent == "SHOW_DESKTOP":

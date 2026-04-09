@@ -94,6 +94,12 @@ class PlatformAdapter(ABC):
         """Maximize an application window."""
         pass
 
+    async def restore(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> dict:
+        """Restore an application window when supported."""
+        return {"status": "error", "reason": "restore_not_supported"}
+
     @abstractmethod
     async def open_url(self, url: str) -> None:
         """Open a URL in the system browser."""

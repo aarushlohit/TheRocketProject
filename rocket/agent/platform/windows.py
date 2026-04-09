@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from agent.platform.adapter import PlatformAdapter
+from agent.platform.window_control import maximize_window, minimize_window, restore_window
 from agent.utils.logger import get_logger
 
 
@@ -645,16 +646,15 @@ class WindowsAdapter(PlatformAdapter):
         """Minimize window on Windows."""
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[MINIMIZE] app_name={app_name}, target={target}")
-        
-        pyautogui = get_pyautogui()
-        if pyautogui:
-            try:
-                pyautogui.hotkey("win", "down")
-                return {"status": "success"}
-            except Exception as e:
-                return {"status": "error", "error": str(e)}
-        
-        return {"status": "error", "reason": "pyautogui_not_available"}
+
+        try:
+            print(f"[WINDOW CONTROL] MINIMIZE_APP -> {{'app': {app_name!r}, 'target': {target!r}}}")
+            affected = minimize_window(app_name)
+            if affected <= 0:
+                return {"status": "error", "reason": "window_not_found"}
+            return {"status": "success", "affected_windows": affected, "method": "win32"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def maximize(
         self, app_name: str | None = None, target: str = "focused"
@@ -662,16 +662,31 @@ class WindowsAdapter(PlatformAdapter):
         """Maximize window on Windows."""
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[MAXIMIZE] app_name={app_name}, target={target}")
-        
-        pyautogui = get_pyautogui()
-        if pyautogui:
-            try:
-                pyautogui.hotkey("win", "up")
-                return {"status": "success"}
-            except Exception as e:
-                return {"status": "error", "error": str(e)}
-        
-        return {"status": "error", "reason": "pyautogui_not_available"}
+
+        try:
+            print(f"[WINDOW CONTROL] MAXIMIZE_APP -> {{'app': {app_name!r}, 'target': {target!r}}}")
+            affected = maximize_window(app_name)
+            if affected <= 0:
+                return {"status": "error", "reason": "window_not_found"}
+            return {"status": "success", "affected_windows": affected, "method": "win32"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def restore(
+        self, app_name: str | None = None, target: str = "focused"
+    ) -> dict:
+        """Restore window on Windows."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print(f"[RESTORE] app_name={app_name}, target={target}")
+
+        try:
+            print(f"[WINDOW CONTROL] RESTORE_APP -> {{'app': {app_name!r}, 'target': {target!r}}}")
+            affected = restore_window(app_name)
+            if affected <= 0:
+                return {"status": "error", "reason": "window_not_found"}
+            return {"status": "success", "affected_windows": affected, "method": "win32"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     # =========================================================================
     # TEXT CONTROL SHORTCUTS (PATCH 5)

@@ -29,7 +29,7 @@ class IntentCategory(Enum):
 
 
 # =============================================================================
-# APP CONTROL INTENTS (7)
+# APP CONTROL INTENTS (8)
 # =============================================================================
 
 APP_CONTROL_INTENTS: Set[str] = {
@@ -37,6 +37,7 @@ APP_CONTROL_INTENTS: Set[str] = {
     "CLOSE_APP",
     "MINIMIZE_APP",
     "MAXIMIZE_APP",
+    "RESTORE_APP",
     "SWITCH_APP",
     "FOCUS_WINDOW",
     "RESTART_APP",
@@ -203,6 +204,7 @@ REQUIRED_SLOTS: Dict[str, List[str]] = {
     "CLOSE_APP": [],
     "MINIMIZE_APP": [],
     "MAXIMIZE_APP": [],
+    "RESTORE_APP": [],
     "SWITCH_APP": ["app"],
     "FOCUS_WINDOW": ["window"],
     "RESTART_APP": ["app"],
@@ -290,6 +292,7 @@ OPTIONAL_SLOTS: Dict[str, List[str]] = {
     "CLOSE_APP": ["app"],
     "MINIMIZE_APP": ["app"],
     "MAXIMIZE_APP": ["app"],
+    "RESTORE_APP": ["app"],
     "FOCUS_WINDOW": ["app"],
     "RESTART_APP": ["arguments"],
     "SWITCH_TAB": [],

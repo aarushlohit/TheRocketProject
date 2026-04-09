@@ -46,7 +46,7 @@ HARD RULES:
 6. If multiple actions are present, return MULTI_STEP with sequential steps.
 
 SUPPORTED ENUM INTENTS:
-OPEN_APP, CLOSE_APP, MINIMIZE_APP, MAXIMIZE_APP, SWITCH_APP, FOCUS_WINDOW,
+OPEN_APP, CLOSE_APP, MINIMIZE_APP, MAXIMIZE_APP, RESTORE_APP, SWITCH_APP, FOCUS_WINDOW,
 OPEN_URL, SEARCH_WEB, NEW_TAB, CLOSE_TAB, SWITCH_TAB, REFRESH_PAGE, SCROLL_UP, SCROLL_DOWN,
 TYPE_TEXT, CLEAR_TEXT, SELECT_TEXT, COPY, PASTE, CUT, PRESS_KEYS,
 LOCK_SCREEN, VOLUME_UP, VOLUME_DOWN, MUTE, BRIGHTNESS_UP, BRIGHTNESS_DOWN,
@@ -145,7 +145,7 @@ def extract_app_name(text: str) -> str | None:
 
 
 SUPPORTED_ENUM_INTENTS = {
-    "OPEN_APP", "CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "SWITCH_APP", "FOCUS_WINDOW",
+    "OPEN_APP", "CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SWITCH_APP", "FOCUS_WINDOW",
     "OPEN_URL", "SEARCH_WEB", "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
     "TYPE_TEXT", "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
     "LOCK_SCREEN", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
@@ -270,6 +270,10 @@ def _parse_single_intent(text: str) -> dict:
         return {"intent": "MINIMIZE_APP", "slots": {}, "confidence": 0.8}
     if cleaned.startswith("maximize"):
         return {"intent": "MAXIMIZE_APP", "slots": {}, "confidence": 0.8}
+    if cleaned.startswith("restore"):
+        target = cleaned.split(" ", 1)[1].strip() if " " in cleaned else ""
+        slots = {"app": target} if target and target != "window" else {}
+        return {"intent": "RESTORE_APP", "slots": slots, "confidence": 0.8}
     if cleaned.startswith("switch app"):
         return {"intent": "SWITCH_APP", "slots": {}, "confidence": 0.8}
     if cleaned.startswith("focus "):
@@ -919,7 +923,7 @@ class DrawToActionPipeline:
             )
 
         if intent_name in {
-            "MINIMIZE_APP", "MAXIMIZE_APP", "SWITCH_APP", "FOCUS_WINDOW",
+            "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SWITCH_APP", "FOCUS_WINDOW",
             "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
             "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
             "LOCK_SCREEN", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",

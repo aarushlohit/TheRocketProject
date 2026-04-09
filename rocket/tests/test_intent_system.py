@@ -14,7 +14,7 @@ class TestIntentSystem:
         """Verify the expanded Stage 5.6 intent count."""
         from agent.core.intent_system import VALID_INTENTS
 
-        assert len(VALID_INTENTS) == 65
+        assert len(VALID_INTENTS) == 66
 
     def test_app_control_intents(self):
         """Verify app control intents."""
@@ -25,6 +25,7 @@ class TestIntentSystem:
             "CLOSE_APP",
             "MINIMIZE_APP",
             "MAXIMIZE_APP",
+            "RESTORE_APP",
             "SWITCH_APP",
             "FOCUS_WINDOW",
             "RESTART_APP",

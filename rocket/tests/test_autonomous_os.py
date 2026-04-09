@@ -111,6 +111,12 @@ class TestIntentClassification:
         result = classify_intent("close notepad")
         assert result["intent"] == "CLOSE_APP"
 
+    def test_restore_app(self):
+        """Test RESTORE_APP intent."""
+        result = classify_intent("restore notepad")
+        assert result["intent"] == "RESTORE_APP"
+        assert result["slots"]["app"] == "notepad"
+
     def test_volume_up_a_bit(self):
         """Test natural-language volume increase."""
         result = classify_intent("volume up a bit")

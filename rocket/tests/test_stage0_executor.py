@@ -37,6 +37,9 @@ class FakePlatform:
     async def maximize(self, app_name: str | None = None, target: str = "focused") -> None:
         self.calls.append(("maximize", app_name, target))
 
+    async def restore(self, app_name: str | None = None, target: str = "focused") -> None:
+        self.calls.append(("restore", app_name, target))
+
     async def open_url(self, url: str) -> None:
         self.calls.append(("open_url", url))
 
@@ -187,3 +190,25 @@ def test_executor_uses_dedicated_lock_screen():
         assert platform.calls == [("lock_screen",)]
         assert result.status == "success"
         assert result.message == "Locking system"
+
+
+def test_executor_routes_restore_app():
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: True,
+        )
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="RESTORE_APP", parameters={"app": "notepad"}, confidence=0.95)
+            )
+        )
+
+        assert platform.calls == [("restore", "notepad", "focused")]
+        assert result.status == "success"
+        assert result.message == "Window restored"

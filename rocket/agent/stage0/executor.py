@@ -199,6 +199,17 @@ class ActionExecutor:
                 await self.platform.maximize(app_name=params.get("app"), target=params.get("target", "focused"))
                 return Result(status="success", message="Window maximized")
 
+            if action == "RESTORE_APP":
+                print(f"[WINDOW CONTROL] {action} -> {params}")
+                restore_result = await self.platform.restore(
+                    app_name=params.get("app"),
+                    target=params.get("target", "focused"),
+                )
+                status = restore_result.get("status", "success") if isinstance(restore_result, dict) else "success"
+                if status != "success":
+                    return Result(status="error", message="Failed to restore window", error_code="RESTORE_FAILED", data=restore_result)
+                return Result(status="success", message="Window restored")
+
             if action == "SCREENSHOT":
                 screenshot_path = await self.platform.screenshot(self.artifacts_dir)
                 return Result(
