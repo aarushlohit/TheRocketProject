@@ -35,6 +35,7 @@ Pipeline:
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import time
 from dataclasses import dataclass, asdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -60,11 +61,21 @@ from agent.core.confirmation_system import (
     init_confirmation_manager,
 )
 from agent.core.execution_verifier import verify_execution
+from agent.platform.audio_control import mute as mute_system_audio, unmute as unmute_system_audio
 from agent.platform.adapter import PlatformAdapter
 from agent.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+def minimize_all_windows() -> None:
+    """Show the desktop on Windows without relying on pyautogui."""
+    user32 = ctypes.windll.user32
+    user32.keybd_event(0x5B, 0, 0, 0)
+    user32.keybd_event(0x44, 0, 0, 0)
+    user32.keybd_event(0x44, 0, 2, 0)
+    user32.keybd_event(0x5B, 0, 2, 0)
 
 
 # =============================================================================
@@ -450,9 +461,12 @@ class ExecutionEngine:
             "MAXIMIZE_APP": self._execute_maximize_app,
             "RESTORE_APP": self._execute_restore_app,
             "LOCK_SCREEN": self._execute_lock_screen,
+            "MINIMIZE_ALL": self._execute_minimize_all,
             "SHOW_DESKTOP": self._execute_show_desktop,
             "VOLUME_UP": self._execute_volume_up,
             "VOLUME_DOWN": self._execute_volume_down,
+            "MUTE": self._execute_mute,
+            "UNMUTE": self._execute_unmute,
             "UNDO": self._execute_undo,
             "REDO": self._execute_redo,
         }
@@ -735,15 +749,43 @@ class ExecutionEngine:
             confidence=confidence,
         )
 
+    async def _execute_minimize_all(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute MINIMIZE_ALL intent."""
+        try:
+            minimize_all_windows()
+            return ExecutionResult(
+                status="success",
+                message="All windows minimized",
+                intent="MINIMIZE_ALL",
+                confidence=confidence,
+            )
+        except Exception as e:
+            return ExecutionResult(
+                status="failed",
+                message=f"Failed to minimize all windows: {e}",
+                intent="MINIMIZE_ALL",
+                confidence=confidence,
+                error_code="MINIMIZE_ALL_FAILED",
+            )
+
     async def _execute_show_desktop(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute SHOW_DESKTOP intent."""
-        result = await self.platform.press_keys("win+d")
-        return ExecutionResult(
-            status="success" if result.get("status") == "success" else "failed",
-            message="Showed desktop" if result.get("status") == "success" else "Failed to show desktop",
-            intent="SHOW_DESKTOP",
-            confidence=confidence,
-        )
+        try:
+            minimize_all_windows()
+            return ExecutionResult(
+                status="success",
+                message="Showed desktop",
+                intent="SHOW_DESKTOP",
+                confidence=confidence,
+            )
+        except Exception as e:
+            return ExecutionResult(
+                status="failed",
+                message=f"Failed to show desktop: {e}",
+                intent="SHOW_DESKTOP",
+                confidence=confidence,
+                error_code="SHOW_DESKTOP_FAILED",
+            )
 
     async def _execute_volume_up(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute VOLUME_UP intent."""
@@ -774,6 +816,44 @@ class ExecutionEngine:
             confidence=confidence,
             data={"value": value},
         )
+
+    async def _execute_mute(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute MUTE intent."""
+        try:
+            mute_system_audio()
+            return ExecutionResult(
+                status="success",
+                message="Muted",
+                intent="MUTE",
+                confidence=confidence,
+            )
+        except Exception as e:
+            return ExecutionResult(
+                status="failed",
+                message=f"Failed to mute audio: {e}",
+                intent="MUTE",
+                confidence=confidence,
+                error_code="MUTE_FAILED",
+            )
+
+    async def _execute_unmute(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute UNMUTE intent."""
+        try:
+            unmute_system_audio()
+            return ExecutionResult(
+                status="success",
+                message="Unmuted",
+                intent="UNMUTE",
+                confidence=confidence,
+            )
+        except Exception as e:
+            return ExecutionResult(
+                status="failed",
+                message=f"Failed to unmute audio: {e}",
+                intent="UNMUTE",
+                confidence=confidence,
+                error_code="UNMUTE_FAILED",
+            )
 
     async def _execute_undo(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute UNDO intent."""

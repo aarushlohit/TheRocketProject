@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,11 +13,24 @@ from typing import Callable, Optional
 from agent.core.intent import Intent
 from agent.core.result import Result
 from agent.core.safety import full_validation, validate_intent, requires_confirmation
+from agent.platform.audio_control import mute, unmute
 from agent.platform.adapter import PlatformAdapter
 from agent.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+def minimize_all_windows() -> None:
+    """Show the Windows desktop using the shell hotkey at the OS API layer."""
+    if sys.platform not in ("win32", "windows"):
+        raise RuntimeError("MINIMIZE_ALL is only supported on Windows")
+
+    user32 = ctypes.windll.user32
+    user32.keybd_event(0x5B, 0, 0, 0)
+    user32.keybd_event(0x44, 0, 0, 0)
+    user32.keybd_event(0x44, 0, 2, 0)
+    user32.keybd_event(0x5B, 0, 2, 0)
 
 
 class ActionExecutor:
@@ -333,6 +347,10 @@ class ActionExecutor:
                 await self.platform.press_keys("win+l")
                 return Result(status="success", message="Screen locked")
 
+            if action in {"MINIMIZE_ALL", "SHOW_DESKTOP"}:
+                minimize_all_windows()
+                return Result(status="success", message="All windows minimized")
+
             if action == "VOLUME_UP":
                 value = max(0, min(100, int(params.get("value", 5) or 5)))
                 print(f"[VOLUME ACTION] value={value}")
@@ -354,13 +372,12 @@ class ActionExecutor:
                 return Result(status="success", message="Volume decreased")
 
             if action == "MUTE":
-                # PATCH 4: Use proper mute control if available
-                if hasattr(self.platform, 'volume_mute'):
-                    result = await self.platform.volume_mute()
-                    if isinstance(result, dict) and result.get("status") == "success":
-                        return Result(status="success", message="Mute toggled")
-                await self.platform.press_keys("volumemute")
-                return Result(status="success", message="Mute toggled")
+                mute()
+                return Result(status="success", message="Muted")
+
+            if action == "UNMUTE":
+                unmute()
+                return Result(status="success", message="Unmuted")
 
             if action == "BRIGHTNESS_UP":
                 await self.platform.press_keys("brightnessup")

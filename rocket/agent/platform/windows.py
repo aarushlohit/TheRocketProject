@@ -14,10 +14,12 @@ import shutil
 import subprocess
 import time
 import webbrowser
+import ctypes
 from pathlib import Path
 from typing import Optional
 
 from agent.platform.adapter import PlatformAdapter
+from agent.platform.audio_control import adjust_volume, mute, unmute
 from agent.platform.window_control import maximize_window, minimize_window, restore_window
 from agent.utils.logger import get_logger
 
@@ -306,6 +308,22 @@ def try_protocol_launch(app_name: str) -> bool:
 
 class WindowsAdapter(PlatformAdapter):
     """Windows-specific platform operations with HYBRID execution."""
+
+    async def show_desktop(self) -> dict:
+        """Show the Windows desktop without pyautogui."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print("[SHOW_DESKTOP]")
+
+        try:
+            user32 = ctypes.windll.user32
+            user32.keybd_event(0x5B, 0, 0, 0)
+            user32.keybd_event(0x44, 0, 0, 0)
+            user32.keybd_event(0x44, 0, 2, 0)
+            user32.keybd_event(0x5B, 0, 2, 0)
+            return {"status": "success", "action": "show_desktop", "method": "user32.keybd_event"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
 
     async def lock_screen(self) -> dict:
         """Lock the current Windows workstation deterministically.
@@ -804,31 +822,9 @@ class WindowsAdapter(PlatformAdapter):
         print(f"[VOLUME_UP] amount={amount}")
         
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
-            current = volume.GetMasterVolumeLevelScalar()
-            new_level = min(1.0, current + amount)
-            volume.SetMasterVolumeLevelScalar(new_level, None)
-            
+            new_level = adjust_volume(amount)
             print(f"[EXECUTION SUCCESS] Volume increased to {new_level:.0%}")
             return {"status": "success", "volume": new_level, "action": "volume_up"}
-        except ImportError:
-            # Fallback to keyboard
-            pyautogui = get_pyautogui()
-            if pyautogui:
-                try:
-                    for _ in range(5):  # 5 presses for ~10% increase
-                        pyautogui.press("volumeup")
-                    print(f"[EXECUTION SUCCESS] Volume increased via keyboard")
-                    return {"status": "success", "action": "volume_up", "method": "keyboard"}
-                except Exception as e:
-                    return {"status": "error", "error": str(e)}
-            return {"status": "error", "reason": "pycaw_not_installed"}
         except Exception as e:
             print(f"[EXECUTION ERROR] {e}")
             return {"status": "error", "error": str(e)}
@@ -839,65 +835,35 @@ class WindowsAdapter(PlatformAdapter):
         print(f"[VOLUME_DOWN] amount={amount}")
         
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
-            current = volume.GetMasterVolumeLevelScalar()
-            new_level = max(0.0, current - amount)
-            volume.SetMasterVolumeLevelScalar(new_level, None)
-            
+            new_level = adjust_volume(-amount)
             print(f"[EXECUTION SUCCESS] Volume decreased to {new_level:.0%}")
             return {"status": "success", "volume": new_level, "action": "volume_down"}
-        except ImportError:
-            # Fallback to keyboard
-            pyautogui = get_pyautogui()
-            if pyautogui:
-                try:
-                    for _ in range(5):
-                        pyautogui.press("volumedown")
-                    print(f"[EXECUTION SUCCESS] Volume decreased via keyboard")
-                    return {"status": "success", "action": "volume_down", "method": "keyboard"}
-                except Exception as e:
-                    return {"status": "error", "error": str(e)}
-            return {"status": "error", "reason": "pycaw_not_installed"}
         except Exception as e:
             print(f"[EXECUTION ERROR] {e}")
             return {"status": "error", "error": str(e)}
 
     async def volume_mute(self) -> dict:
-        """Toggle mute."""
+        """Mute system audio."""
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[VOLUME_MUTE]")
         
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
-            is_muted = volume.GetMute()
-            volume.SetMute(not is_muted, None)
-            
-            action = "unmuted" if is_muted else "muted"
-            print(f"[EXECUTION SUCCESS] Volume {action}")
-            return {"status": "success", "action": action}
-        except ImportError:
-            # Fallback to keyboard
-            pyautogui = get_pyautogui()
-            if pyautogui:
-                try:
-                    pyautogui.press("volumemute")
-                    print(f"[EXECUTION SUCCESS] Volume mute toggled via keyboard")
-                    return {"status": "success", "action": "mute_toggle", "method": "keyboard"}
-                except Exception as e:
-                    return {"status": "error", "error": str(e)}
-            return {"status": "error", "reason": "pycaw_not_installed"}
+            mute()
+            print("[EXECUTION SUCCESS] Volume muted")
+            return {"status": "success", "action": "muted"}
+        except Exception as e:
+            print(f"[EXECUTION ERROR] {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def volume_unmute(self) -> dict:
+        """Unmute system audio."""
+        print(f"\n========== [EXECUTION START] ==========")
+        print("[VOLUME_UNMUTE]")
+
+        try:
+            unmute()
+            print("[EXECUTION SUCCESS] Volume unmuted")
+            return {"status": "success", "action": "unmuted"}
         except Exception as e:
             print(f"[EXECUTION ERROR] {e}")
             return {"status": "error", "error": str(e)}

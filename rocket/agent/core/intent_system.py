@@ -86,6 +86,7 @@ INPUT_CONTROL_INTENTS: Set[str] = {
 
 SYSTEM_CONTROL_INTENTS: Set[str] = {
     "LOCK_SCREEN",
+    "MINIMIZE_ALL",
     "SHUTDOWN",
     "RESTART_SYSTEM",
     "SLEEP",
@@ -235,6 +236,7 @@ REQUIRED_SLOTS: Dict[str, List[str]] = {
 
     # System control
     "LOCK_SCREEN": [],
+    "MINIMIZE_ALL": [],
     "SHUTDOWN": [],
     "RESTART_SYSTEM": [],
     "SLEEP": [],
@@ -339,6 +341,7 @@ DANGEROUS_INTENTS: Set[str] = {
 
 SYSTEM_LEVEL_INTENTS: Set[str] = {
     "LOCK_SCREEN",
+    "MINIMIZE_ALL",
     "SHUTDOWN",
     "RESTART_SYSTEM",
     "SLEEP",
@@ -451,6 +454,8 @@ def suggest_intent(text: str) -> List[str]:
     # System keywords
     if any(word in text_lower for word in ["lock", "lock screen"]):
         suggestions.append("LOCK_SCREEN")
+    if "minimize all" in text_lower or "show desktop" in text_lower:
+        suggestions.append("MINIMIZE_ALL")
     if any(word in text_lower for word in ["shutdown", "power off"]):
         suggestions.append("SHUTDOWN")
     if any(word in text_lower for word in ["restart system", "reboot"]):

@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from agent.core.intent import Intent
+import agent.stage0.executor as stage0_executor
 from agent.stage0.executor import ActionExecutor
 
 
@@ -212,3 +213,88 @@ def test_executor_routes_restore_app():
         assert platform.calls == [("restore", "notepad", "focused")]
         assert result.status == "success"
         assert result.message == "Window restored"
+
+
+def test_executor_routes_mute(monkeypatch):
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: True,
+        )
+
+        called = {"mute": 0}
+
+        monkeypatch.setattr(stage0_executor, "mute", lambda: called.__setitem__("mute", called["mute"] + 1))
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="MUTE", parameters={}, confidence=0.95)
+            )
+        )
+
+        assert called["mute"] == 1
+        assert platform.calls == []
+        assert result.status == "success"
+        assert result.message == "Muted"
+
+
+def test_executor_routes_unmute(monkeypatch):
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: True,
+        )
+
+        called = {"unmute": 0}
+
+        monkeypatch.setattr(stage0_executor, "unmute", lambda: called.__setitem__("unmute", called["unmute"] + 1))
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="UNMUTE", parameters={}, confidence=0.95)
+            )
+        )
+
+        assert called["unmute"] == 1
+        assert platform.calls == []
+        assert result.status == "success"
+        assert result.message == "Unmuted"
+
+
+def test_executor_routes_minimize_all(monkeypatch):
+    with TemporaryDirectory() as temp_dir:
+        platform = FakePlatform()
+        executor = ActionExecutor(
+            platform=platform,
+            artifacts_dir=Path(temp_dir),
+            debug_mode=False,
+            platform_type="windows",
+            availability_checker=lambda app, platform: True,
+        )
+
+        called = {"minimize_all": 0}
+
+        monkeypatch.setattr(
+            stage0_executor,
+            "minimize_all_windows",
+            lambda: called.__setitem__("minimize_all", called["minimize_all"] + 1),
+        )
+
+        result = asyncio.run(
+            executor.execute(
+                Intent(action="MINIMIZE_ALL", parameters={}, confidence=0.95)
+            )
+        )
+
+        assert called["minimize_all"] == 1
+        assert platform.calls == []
+        assert result.status == "success"
+        assert result.message == "All windows minimized"

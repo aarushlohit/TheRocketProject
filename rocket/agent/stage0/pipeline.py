@@ -49,7 +49,7 @@ SUPPORTED ENUM INTENTS:
 OPEN_APP, CLOSE_APP, MINIMIZE_APP, MAXIMIZE_APP, RESTORE_APP, SWITCH_APP, FOCUS_WINDOW,
 OPEN_URL, SEARCH_WEB, NEW_TAB, CLOSE_TAB, SWITCH_TAB, REFRESH_PAGE, SCROLL_UP, SCROLL_DOWN,
 TYPE_TEXT, CLEAR_TEXT, SELECT_TEXT, COPY, PASTE, CUT, PRESS_KEYS,
-LOCK_SCREEN, VOLUME_UP, VOLUME_DOWN, MUTE, BRIGHTNESS_UP, BRIGHTNESS_DOWN,
+LOCK_SCREEN, MINIMIZE_ALL, VOLUME_UP, VOLUME_DOWN, MUTE, UNMUTE, BRIGHTNESS_UP, BRIGHTNESS_DOWN,
 OPEN_FILE, DELETE_FILE, CREATE_FILE, MOVE_FILE, RENAME_FILE,
 CLICK_ELEMENT, SCROLL, WAIT,
 MULTI_STEP, CONDITIONAL,
@@ -148,7 +148,7 @@ SUPPORTED_ENUM_INTENTS = {
     "OPEN_APP", "CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SWITCH_APP", "FOCUS_WINDOW",
     "OPEN_URL", "SEARCH_WEB", "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
     "TYPE_TEXT", "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
-    "LOCK_SCREEN", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
+    "LOCK_SCREEN", "MINIMIZE_ALL", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "UNMUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
     "OPEN_FILE", "DELETE_FILE", "CREATE_FILE", "MOVE_FILE", "RENAME_FILE",
     "CLICK_ELEMENT", "SCROLL", "WAIT", "MULTI_STEP", "CONDITIONAL", "CONFIRMATION_REQUIRED", "UNKNOWN",
     "SCREENSHOT", "MINIMIZE", "MAXIMIZE",
@@ -195,6 +195,18 @@ def resolve_intent(text: str) -> tuple[str, dict]:
         if "down" in normalized or "reduce" in normalized or "decrease" in normalized:
             print("[RESOLVED INTENT] VOLUME_DOWN")
             return "VOLUME_DOWN", {"value": value}
+
+    if "mute" in normalized and "unmute" not in normalized:
+        print("[RESOLVED INTENT] MUTE")
+        return "MUTE", {}
+
+    if "unmute" in normalized:
+        print("[RESOLVED INTENT] UNMUTE")
+        return "UNMUTE", {}
+
+    if "minimize all" in normalized or "show desktop" in normalized:
+        print("[RESOLVED INTENT] MINIMIZE_ALL")
+        return "MINIMIZE_ALL", {}
 
     parsed = parse_intent(normalized)
     intent = parsed.get("intent", "UNKNOWN")
@@ -282,11 +294,15 @@ def _parse_single_intent(text: str) -> dict:
 
     if "lock screen" in cleaned:
         return {"intent": "LOCK_SCREEN", "slots": {}, "confidence": 0.9}
+    if "minimize all" in cleaned or "show desktop" in cleaned:
+        return {"intent": "MINIMIZE_ALL", "slots": {}, "confidence": 0.9}
     if "volume up" in cleaned:
         return {"intent": "VOLUME_UP", "slots": {}, "confidence": 0.8}
     if "volume down" in cleaned:
         return {"intent": "VOLUME_DOWN", "slots": {}, "confidence": 0.8}
-    if cleaned == "mute" or " mute" in cleaned:
+    if "unmute" in cleaned:
+        return {"intent": "UNMUTE", "slots": {}, "confidence": 0.8}
+    if "mute" in cleaned and "unmute" not in cleaned:
         return {"intent": "MUTE", "slots": {}, "confidence": 0.8}
     if "brightness up" in cleaned:
         return {"intent": "BRIGHTNESS_UP", "slots": {}, "confidence": 0.75}
@@ -926,7 +942,7 @@ class DrawToActionPipeline:
             "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SWITCH_APP", "FOCUS_WINDOW",
             "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
             "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
-            "LOCK_SCREEN", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
+            "LOCK_SCREEN", "MINIMIZE_ALL", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "UNMUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
             "OPEN_FILE", "DELETE_FILE", "CREATE_FILE", "MOVE_FILE", "RENAME_FILE",
             "CLICK_ELEMENT", "SCROLL", "WAIT", "CONDITIONAL", "CONFIRMATION_REQUIRED",
             "SCREENSHOT", "MINIMIZE", "MAXIMIZE",

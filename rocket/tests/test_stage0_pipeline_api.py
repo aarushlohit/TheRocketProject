@@ -282,6 +282,30 @@ def test_normalize_model_output_blocks_model_multistep(tmp_path):
     assert normalized["slots"] == {}
 
 
+def test_process_text_input_resolves_unmute(tmp_path):
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("unmute"))
+
+    assert result.intent.action == "UNMUTE"
+
+
+def test_process_text_input_resolves_minimize_all(tmp_path):
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("show desktop"))
+
+    assert result.intent.action == "MINIMIZE_ALL"
+
+
 def test_validate_api_key_success(monkeypatch):
     class FakeResp:
         status_code = 200
