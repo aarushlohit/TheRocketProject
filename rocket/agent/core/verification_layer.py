@@ -57,6 +57,7 @@ INTENT_VERIFICATION_MAP: Dict[str, VerificationStrategy] = {
     
     # Input - no verification needed for typing
     "TYPE_TEXT": VerificationStrategy.NONE,
+    "SAVE_FILE": VerificationStrategy.NONE,
     "PRESS_KEYS": VerificationStrategy.NONE,
     "COPY": VerificationStrategy.NONE,
     "PASTE": VerificationStrategy.NONE,

@@ -20,6 +20,7 @@ from pprint import pformat
 from PIL import Image
 import requests
 
+from agent.core.context_manager import PRONOUN_TOKENS, get_context_manager
 from agent.core.intent import Intent
 from agent.stage0.validation import (
     StageZeroValidationError,
@@ -30,6 +31,9 @@ from agent.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+APP_CONTEXT_INTENTS = {"CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "FOCUS_WINDOW", "SAVE_FILE"}
+SAVE_FILE_PATTERN = re.compile(r"^save(?:\s+file)?(?:\s+(?:as\s+)?)?(?P<filename>[^\s]+)?$")
 
 
 # =============================================================================
@@ -48,7 +52,7 @@ HARD RULES:
 SUPPORTED ENUM INTENTS:
 OPEN_APP, CLOSE_APP, MINIMIZE_APP, MAXIMIZE_APP, RESTORE_APP, SWITCH_APP, FOCUS_WINDOW,
 OPEN_URL, SEARCH_WEB, NEW_TAB, CLOSE_TAB, SWITCH_TAB, REFRESH_PAGE, SCROLL_UP, SCROLL_DOWN,
-TYPE_TEXT, CLEAR_TEXT, SELECT_TEXT, COPY, PASTE, CUT, PRESS_KEYS,
+SAVE_FILE, TYPE_TEXT, CLEAR_TEXT, SELECT_TEXT, COPY, PASTE, CUT, PRESS_KEYS,
 LOCK_SCREEN, MINIMIZE_ALL, MAXIMIZE_ALL, VOLUME_UP, VOLUME_DOWN, MUTE, UNMUTE, BRIGHTNESS_UP, BRIGHTNESS_DOWN,
 OPEN_FILE, DELETE_FILE, CREATE_FILE, MOVE_FILE, RENAME_FILE,
 CLICK_ELEMENT, SCROLL, WAIT,
@@ -147,7 +151,7 @@ def extract_app_name(text: str) -> str | None:
 SUPPORTED_ENUM_INTENTS = {
     "OPEN_APP", "CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SWITCH_APP", "FOCUS_WINDOW",
     "OPEN_URL", "SEARCH_WEB", "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
-    "TYPE_TEXT", "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
+    "SAVE_FILE", "TYPE_TEXT", "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
     "LOCK_SCREEN", "MINIMIZE_ALL", "MAXIMIZE_ALL", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "UNMUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
     "OPEN_FILE", "DELETE_FILE", "CREATE_FILE", "MOVE_FILE", "RENAME_FILE",
     "CLICK_ELEMENT", "SCROLL", "WAIT", "MULTI_STEP", "CONDITIONAL", "CONFIRMATION_REQUIRED", "UNKNOWN",
@@ -212,9 +216,19 @@ def resolve_intent(text: str) -> tuple[str, dict]:
         print("[RESOLVED INTENT] MAXIMIZE_ALL")
         return "MAXIMIZE_ALL", {}
 
+    save_match = SAVE_FILE_PATTERN.match(normalized)
+    if save_match:
+        filename = save_match.group("filename")
+        if filename and filename in PRONOUN_TOKENS:
+            filename = None
+        slots = {"filename": filename} if filename else {}
+        print("[RESOLVED INTENT] SAVE_FILE")
+        return "SAVE_FILE", slots
+
     parsed = parse_intent(normalized)
     intent = parsed.get("intent", "UNKNOWN")
     slots = parsed.get("slots", {}) if isinstance(parsed.get("slots"), dict) else {}
+    slots = _strip_pronoun_slots(intent, slots)
 
     if intent == "MULTI_STEP":
         print("[BLOCKED] MULTI_STEP disabled")
@@ -228,6 +242,23 @@ def resolve_intent(text: str) -> tuple[str, dict]:
 
     print(f"[RESOLVED INTENT] {intent}")
     return intent, slots
+
+
+def _strip_pronoun_slots(intent: str, slots: dict) -> dict:
+    if intent not in APP_CONTEXT_INTENTS or not isinstance(slots, dict):
+        return slots
+
+    normalized_slots = dict(slots)
+
+    app = normalized_slots.get("app")
+    if isinstance(app, str) and app.strip().lower() in PRONOUN_TOKENS:
+        normalized_slots.pop("app", None)
+
+    window = normalized_slots.get("window")
+    if isinstance(window, str) and window.strip().lower() in PRONOUN_TOKENS:
+        normalized_slots.pop("window", None)
+
+    return normalized_slots
 
 
 def _parse_single_intent(text: str) -> dict:
@@ -260,6 +291,14 @@ def _parse_single_intent(text: str) -> dict:
     if cleaned.startswith("search "):
         query = cleaned.split(" ", 1)[1].strip()
         return {"intent": "SEARCH_WEB", "slots": {"query": query}, "confidence": 0.85}
+
+    save_match = SAVE_FILE_PATTERN.match(cleaned)
+    if save_match:
+        filename = save_match.group("filename")
+        if filename and filename in PRONOUN_TOKENS:
+            filename = None
+        slots = {"filename": filename} if filename else {}
+        return {"intent": "SAVE_FILE", "slots": slots, "confidence": 0.9}
 
     if cleaned.startswith("type ") or cleaned.startswith("write ") or cleaned.startswith("input "):
         text_value = cleaned.split(" ", 1)[1].strip() if " " in cleaned else ""
@@ -546,6 +585,7 @@ class DrawToActionPipeline:
         self.received_dir = self.storage_dir / "received"
         self.variants_dir = self.storage_dir / "variants"
         self._last_valid_result: InferenceResult | None = None
+        self.context_manager = get_context_manager()
         self.received_dir.mkdir(parents=True, exist_ok=True)
         self.variants_dir.mkdir(parents=True, exist_ok=True)
 
@@ -819,6 +859,8 @@ class DrawToActionPipeline:
         if not isinstance(slots, dict):
             slots = {}
 
+        slots = self._apply_context_resolution(intent_name, slots)
+
         metadata = {"normalized_text": normalized_text}
 
         if intent_name == "MULTI_STEP":
@@ -931,9 +973,27 @@ class DrawToActionPipeline:
                 "Intent parsed from model JSON",
             )
 
+        if intent_name == "SAVE_FILE":
+            save_slots: dict[str, str] = {}
+            filename = slots.get("filename")
+            app = slots.get("app")
+            if isinstance(filename, str) and filename.strip():
+                save_slots["filename"] = filename.strip()
+            if isinstance(app, str) and app.strip():
+                save_slots["app"] = app.strip()
+            return (
+                Intent(
+                    action="SAVE_FILE",
+                    parameters=save_slots,
+                    confidence=model_confidence,
+                    metadata=metadata,
+                ),
+                "Intent parsed from model JSON",
+            )
+
         if intent_name == "CLOSE_APP":
             app = slots.get("app")
-            close_slots = {"app": str(app).strip()} if isinstance(app, str) and app.strip() else {"target": "focused"}
+            close_slots = {"app": str(app).strip()} if isinstance(app, str) and app.strip() else {}
             return (
                 Intent(
                     action="CLOSE_APP",
@@ -947,7 +1007,7 @@ class DrawToActionPipeline:
         if intent_name in {
             "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SWITCH_APP", "FOCUS_WINDOW",
             "NEW_TAB", "CLOSE_TAB", "SWITCH_TAB", "REFRESH_PAGE", "SCROLL_UP", "SCROLL_DOWN",
-            "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
+            "SAVE_FILE", "CLEAR_TEXT", "SELECT_TEXT", "COPY", "PASTE", "CUT", "PRESS_KEYS",
             "LOCK_SCREEN", "MINIMIZE_ALL", "MAXIMIZE_ALL", "VOLUME_UP", "VOLUME_DOWN", "MUTE", "UNMUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN",
             "OPEN_FILE", "DELETE_FILE", "CREATE_FILE", "MOVE_FILE", "RENAME_FILE",
             "CLICK_ELEMENT", "SCROLL", "WAIT", "CONDITIONAL", "CONFIRMATION_REQUIRED",
@@ -971,6 +1031,25 @@ class DrawToActionPipeline:
             ),
             "Could not determine intent",
         )
+
+    def _apply_context_resolution(self, intent_name: str, slots: dict) -> dict:
+        if intent_name not in APP_CONTEXT_INTENTS:
+            return slots
+
+        resolved_slots = dict(slots)
+        resolved_slots = _strip_pronoun_slots(intent_name, resolved_slots)
+
+        if not resolved_slots.get("app"):
+            resolved_app = self.context_manager.resolve_app(resolved_slots)
+            if resolved_app:
+                resolved_slots["app"] = resolved_app
+                print(f"[CONTEXT INJECTED] {resolved_app}")
+
+        if intent_name == "FOCUS_WINDOW" and not resolved_slots.get("window") and resolved_slots.get("app"):
+            resolved_slots["window"] = resolved_slots["app"]
+
+        print(f"[CONTEXT RESOLVED APP] {resolved_slots.get('app')}")
+        return resolved_slots
 
     def _normalize_model_output(self, model_output: dict | str) -> dict:
         """Normalize model output from either JSON or legacy text OCR."""

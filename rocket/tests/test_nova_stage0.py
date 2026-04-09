@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from agent.core.context_manager import reset_context_manager, get_context_manager
 from agent.core.intent import Intent
 from agent.core.nova_stage0 import NovaStageZeroAgent
 from agent.core.result import Result
@@ -27,6 +28,10 @@ class FakeExecutor:
     async def execute(self, intent):
         self.calls.append(intent)
         return Result(status="debug", message="Dry run executed")
+
+
+def setup_function():
+    reset_context_manager()
 
 
 def test_handle_drawing_image_blocks_unknown_intent():
@@ -58,3 +63,22 @@ def test_handle_drawing_image_blocks_unknown_intent():
         assert payload["reason"] == "uncertain intent"
         assert payload["intent"] == "UNKNOWN"
         assert agent.executor.calls == []
+
+
+def test_update_context_tracks_current_app():
+    with TemporaryDirectory() as temp_dir:
+        agent = NovaStageZeroAgent.__new__(NovaStageZeroAgent)
+        agent.config = Config(data_dir=Path(temp_dir))
+        agent.trace_mode = False
+        agent.last_opened_app = None
+        agent.context_manager = get_context_manager()
+
+        agent._update_context(
+            "OPEN_APP",
+            {"app": "notepad"},
+            Result(status="success", message="Opened notepad"),
+        )
+
+        assert agent.last_opened_app == "notepad"
+        assert get_context_manager().last_app == "notepad"
+        assert get_context_manager().state["current_app"] == "notepad"

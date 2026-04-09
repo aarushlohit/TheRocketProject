@@ -14,12 +14,16 @@ from agent.core.intent import Intent
 from agent.core.result import Result
 from agent.core.safety import full_validation, validate_intent, requires_confirmation
 from agent.platform.audio_control import mute, unmute
+from agent.platform.save_file_control import save_file_via_os
 from agent.platform.window_control import maximize_all_windows
 from agent.platform.adapter import PlatformAdapter
 from agent.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+CONTEXT_REQUIRED_APP_INTENTS = {"CLOSE_APP", "MINIMIZE_APP", "MAXIMIZE_APP", "RESTORE_APP", "SAVE_FILE"}
 
 
 def minimize_all_windows() -> None:
@@ -181,6 +185,14 @@ class ActionExecutor:
                     data=params,
                 )
 
+            if action in CONTEXT_REQUIRED_APP_INTENTS and not str(params.get("app", "")).strip():
+                print("[SAFE BLOCK] No target app")
+                return Result(
+                    status="error",
+                    message="No target app resolved",
+                    error_code="NO_TARGET_APP",
+                )
+
             # MULTI_STEP executes sequentially with stop-on-failure behavior.
             if action == "MULTI_STEP":
                 return await self._execute_multi_step(intent)
@@ -300,6 +312,28 @@ class ActionExecutor:
                 if status == "error":
                     return Result(status="error", message="Failed to type text", error_code="TYPE_TEXT_FAILED", data=result)
                 return Result(status="success", message=f"Typed {len(text)} characters")
+
+            if action == "SAVE_FILE":
+                filename = str(params.get("filename", "")).strip() or None
+                context_app = str(params.get("app", "")).strip() or None
+                print(f"[SAVE_FILE] filename={filename}")
+                print(f"[SAVE_FILE] context_app={context_app}")
+                if not context_app:
+                    print("[SAFE BLOCK] No target app")
+                    return Result(status="error", message="No target app resolved", error_code="NO_TARGET_APP")
+                try:
+                    save_result = save_file_via_os(context_app, filename)
+                except Exception as exc:
+                    return Result(
+                        status="error",
+                        message=f"Failed to save file: {exc}",
+                        error_code="SAVE_FILE_FAILED",
+                    )
+                if save_result.get("status") != "success":
+                    return Result(status="error", message="Failed to save file", error_code="SAVE_FILE_FAILED", data=save_result)
+                print("[SAVE_FILE] executed successfully")
+                message = f"Saved file as {filename}" if filename else "Opened save dialog"
+                return Result(status="success", message=message, data=save_result)
 
             if action == "CLEAR_TEXT":
                 await self.platform.press_keys("ctrl+a")

@@ -78,3 +78,10 @@ def restore_window(process_name: str | None = None) -> int:
     for hwnd in hwnds:
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
     return len(hwnds)
+
+
+def close_window(process_name: str | None = None) -> int:
+    hwnds = _resolve_hwnds(process_name)
+    for hwnd in hwnds:
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+    return len(hwnds)

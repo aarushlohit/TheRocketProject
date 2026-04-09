@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from agent.core.context_manager import get_context_manager, reset_context_manager
 from agent.stage0 import pipeline as pipeline_module
 from agent.stage0.pipeline import (
     DrawToActionPipeline,
@@ -19,6 +20,10 @@ def _png_bytes() -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", (12, 12), color="white").save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def setup_function():
+    reset_context_manager()
 
 
 def test_call_model_uses_chat_completions_post(monkeypatch):
@@ -149,6 +154,18 @@ def test_parse_intent_screenshot():
 def test_parse_intent_unknown():
     parsed = parse_intent("hello world")
     assert parsed["intent"] == "UNKNOWN"
+
+
+def test_parse_intent_save_file_with_filename():
+    parsed = parse_intent("save file report.txt")
+    assert parsed["intent"] == "SAVE_FILE"
+    assert parsed["slots"] == {"filename": "report.txt"}
+
+
+def test_parse_intent_save_without_filename():
+    parsed = parse_intent("save")
+    assert parsed["intent"] == "SAVE_FILE"
+    assert parsed["slots"] == {}
 
 
 def test_process_drawing_uses_ocr_text_for_intent(monkeypatch, tmp_path):
@@ -316,6 +333,67 @@ def test_process_text_input_resolves_maximize_all(tmp_path):
     result = asyncio.run(pipeline.process_text_input("maximize everything"))
 
     assert result.intent.action == "MAXIMIZE_ALL"
+
+
+def test_process_text_input_resolves_close_it_from_context(tmp_path):
+    context = get_context_manager()
+    context.update("OPEN_APP", {"app": "notepad"})
+
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("close it"))
+
+    assert result.intent.action == "CLOSE_APP"
+    assert result.intent.parameters == {"app": "notepad"}
+
+
+def test_process_text_input_resolves_save_file_from_context(tmp_path):
+    context = get_context_manager()
+    context.update("OPEN_APP", {"app": "notepad"})
+
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("save file test.txt"))
+
+    assert result.intent.action == "SAVE_FILE"
+    assert result.intent.parameters == {"filename": "test.txt", "app": "notepad"}
+
+
+def test_process_text_input_resolves_save_it_from_context(tmp_path):
+    context = get_context_manager()
+    context.update("OPEN_APP", {"app": "notepad"})
+
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("save it"))
+
+    assert result.intent.action == "SAVE_FILE"
+    assert result.intent.parameters == {"app": "notepad"}
+
+
+def test_process_text_input_leaves_close_it_unresolved_without_context(tmp_path):
+    pipeline = DrawToActionPipeline(
+        api_key="secret-key",
+        storage_dir=Path(tmp_path),
+        trace_mode=False,
+    )
+
+    result = asyncio.run(pipeline.process_text_input("close it"))
+
+    assert result.intent.action == "CLOSE_APP"
+    assert result.intent.parameters == {}
 
 
 def test_validate_api_key_success(monkeypatch):

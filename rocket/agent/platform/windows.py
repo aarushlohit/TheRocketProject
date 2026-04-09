@@ -20,7 +20,11 @@ from typing import Optional
 
 from agent.platform.adapter import PlatformAdapter
 from agent.platform.audio_control import adjust_volume, mute, unmute
-from agent.platform.window_control import maximize_window, minimize_window, restore_window
+from agent.platform.window_control import close_window, maximize_window, minimize_window, restore_window
+from agent.platform.windows_ui import close_app as close_app_ui
+from agent.platform.windows_ui import maximize_app as maximize_app_ui
+from agent.platform.windows_ui import minimize_app as minimize_app_ui
+from agent.platform.windows_ui import restore_app as restore_app_ui
 from agent.utils.logger import get_logger
 
 
@@ -640,19 +644,21 @@ class WindowsAdapter(PlatformAdapter):
     async def close_app(
         self, app_name: str | None = None, target: str = "focused"
     ) -> dict:
-        """Close application on Windows using Alt+F4."""
+        """Close application on Windows using UIA first, Win32 fallback second."""
         print(f"\n========== [EXECUTION START] ==========")
         print(f"[CLOSE_APP] app_name={app_name}, target={target}")
 
-        pyautogui = get_pyautogui()
-
         try:
-            if pyautogui:
-                pyautogui.hotkey("alt", "f4")
-                print(f"[EXECUTION SUCCESS] Closed focused window via Alt+F4")
-                return {"status": "success", "target": "focused", "method": "alt_f4"}
-            else:
-                return {"status": "error", "reason": "no_target"}
+            if app_name:
+                try:
+                    return close_app_ui(app_name)
+                except Exception as ui_error:
+                    print(f"[WINDOW CONTROL] UI close failed: {ui_error}")
+
+            affected = close_window(app_name)
+            if affected <= 0:
+                return {"status": "error", "reason": "window_not_found"}
+            return {"status": "success", "affected_windows": affected, "method": "win32"}
         except Exception as e:
             print(f"[EXECUTION ERROR] {e}")
             logger.error(f"Failed to close app: {e}")
@@ -667,6 +673,11 @@ class WindowsAdapter(PlatformAdapter):
 
         try:
             print(f"[WINDOW CONTROL] MINIMIZE_APP -> {{'app': {app_name!r}, 'target': {target!r}}}")
+            if app_name:
+                try:
+                    return minimize_app_ui(app_name)
+                except Exception as ui_error:
+                    print(f"[WINDOW CONTROL] UI minimize failed: {ui_error}")
             affected = minimize_window(app_name)
             if affected <= 0:
                 return {"status": "error", "reason": "window_not_found"}
@@ -683,6 +694,11 @@ class WindowsAdapter(PlatformAdapter):
 
         try:
             print(f"[WINDOW CONTROL] MAXIMIZE_APP -> {{'app': {app_name!r}, 'target': {target!r}}}")
+            if app_name:
+                try:
+                    return maximize_app_ui(app_name)
+                except Exception as ui_error:
+                    print(f"[WINDOW CONTROL] UI maximize failed: {ui_error}")
             affected = maximize_window(app_name)
             if affected <= 0:
                 return {"status": "error", "reason": "window_not_found"}
@@ -699,6 +715,11 @@ class WindowsAdapter(PlatformAdapter):
 
         try:
             print(f"[WINDOW CONTROL] RESTORE_APP -> {{'app': {app_name!r}, 'target': {target!r}}}")
+            if app_name:
+                try:
+                    return restore_app_ui(app_name)
+                except Exception as ui_error:
+                    print(f"[WINDOW CONTROL] UI restore failed: {ui_error}")
             affected = restore_window(app_name)
             if affected <= 0:
                 return {"status": "error", "reason": "window_not_found"}

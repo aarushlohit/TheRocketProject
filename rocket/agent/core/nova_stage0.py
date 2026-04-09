@@ -14,6 +14,7 @@ from pprint import pformat
 from typing import Any, Callable, Optional
 
 from agent.core.result import Result
+from agent.core.context_manager import get_context_manager
 from agent.core.execution_engine import ExecutionEngine, ExecutionResult
 from agent.core.feedback_manager import EventType, Priority, get_feedback_manager
 from agent.core.intelligent_pipeline import IntelligentPipeline, PipelineResult
@@ -32,6 +33,9 @@ from agent.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+context_manager = get_context_manager()
+
+
 class NovaStageZeroAgent:
     """Coordinates AI inference, validation, and OS execution."""
 
@@ -46,6 +50,7 @@ class NovaStageZeroAgent:
             confidence_threshold=config.confidence_threshold,
             trace_mode=config.trace_mode,
         )
+        self.context_manager = get_context_manager()
         
         # UNIFIED: IntelligentPipeline (Stage 3 Integration)
         # This is now the ONLY execution path - all commands go through this
@@ -556,10 +561,10 @@ class NovaStageZeroAgent:
         
         if status not in {"success"}:
             return
-        if intent_name != "OPEN_APP":
-            return
+        self.context_manager.update(intent_name, slots)
+        self.context_manager.debug()
 
-        app_name = slots.get("app")
+        app_name = self.context_manager.state.get("current_app")
         if isinstance(app_name, str) and app_name:
             self.last_opened_app = app_name
 

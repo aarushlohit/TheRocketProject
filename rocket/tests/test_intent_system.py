@@ -14,7 +14,7 @@ class TestIntentSystem:
         """Verify the expanded Stage 5.6 intent count."""
         from agent.core.intent_system import VALID_INTENTS
 
-        assert len(VALID_INTENTS) == 68
+        assert len(VALID_INTENTS) == 69
 
     def test_app_control_intents(self):
         """Verify app control intents."""
@@ -56,6 +56,7 @@ class TestIntentSystem:
         from agent.core.intent_system import INPUT_CONTROL_INTENTS
 
         expected = {
+            "SAVE_FILE",
             "TYPE_TEXT",
             "CLEAR_TEXT",
             "SELECT_TEXT",
@@ -150,6 +151,7 @@ class TestIntentSystem:
         valid_intents = [
             "OPEN_APP",
             "SEARCH_WEB",
+            "SAVE_FILE",
             "DOUBLE_CLICK",
             "VOLUME_UP",
             "CONFIRMATION_REQUIRED",

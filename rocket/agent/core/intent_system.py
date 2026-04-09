@@ -68,6 +68,7 @@ BROWSER_CONTROL_INTENTS: Set[str] = {
 # =============================================================================
 
 INPUT_CONTROL_INTENTS: Set[str] = {
+    "SAVE_FILE",
     "TYPE_TEXT",
     "CLEAR_TEXT",
     "SELECT_TEXT",
@@ -225,6 +226,7 @@ REQUIRED_SLOTS: Dict[str, List[str]] = {
     "SCROLL_DOWN": [],
 
     # Input control
+    "SAVE_FILE": [],
     "TYPE_TEXT": ["text"],
     "CLEAR_TEXT": [],
     "SELECT_TEXT": [],
@@ -300,6 +302,7 @@ OPTIONAL_SLOTS: Dict[str, List[str]] = {
     "FOCUS_WINDOW": ["app"],
     "RESTART_APP": ["arguments"],
     "SWITCH_TAB": [],
+    "SAVE_FILE": ["app", "filename"],
     "TYPE_TEXT": ["target"],
     "PRESS_KEYS": ["count"],
     "WAIT": ["seconds", "condition"],
@@ -443,6 +446,8 @@ def suggest_intent(text: str) -> List[str]:
     # Input keywords
     if any(word in text_lower for word in ["type", "write", "enter text"]):
         suggestions.append("TYPE_TEXT")
+    if "save" in text_lower:
+        suggestions.append("SAVE_FILE")
     if any(word in text_lower for word in ["press", "key", "hotkey", "shortcut"]):
         suggestions.append("PRESS_KEYS")
     if "copy" in text_lower:

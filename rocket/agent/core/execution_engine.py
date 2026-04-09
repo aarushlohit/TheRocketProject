@@ -62,6 +62,7 @@ from agent.core.confirmation_system import (
 )
 from agent.core.execution_verifier import verify_execution
 from agent.platform.audio_control import mute as mute_system_audio, unmute as unmute_system_audio
+from agent.platform.save_file_control import save_file_via_os
 from agent.platform.window_control import maximize_all_windows
 from agent.platform.adapter import PlatformAdapter
 from agent.utils.logger import get_logger
@@ -452,6 +453,7 @@ class ExecutionEngine:
             "FOCUS_APP": self._execute_focus_app,
             "OPEN_URL": self._execute_open_url,
             "SEARCH_WEB": self._execute_search_web,
+            "SAVE_FILE": self._execute_save_file,
             "TYPE_TEXT": self._execute_type_text,
             "PRESS_KEYS": self._execute_press_keys,
             "SCREENSHOT": self._execute_screenshot,
@@ -610,6 +612,41 @@ class ExecutionEngine:
             confidence=confidence,
             data={"chars": len(text)},
         )
+
+    async def _execute_save_file(self, slots: dict, confidence: float) -> ExecutionResult:
+        """Execute SAVE_FILE intent."""
+        app = str(slots.get("app", "")).strip()
+        if not app:
+            return ExecutionResult(
+                status="failed",
+                message="No target app resolved",
+                intent="SAVE_FILE",
+                confidence=confidence,
+                error_code="NO_TARGET_APP",
+            )
+
+        filename = str(slots.get("filename", "")).strip() or None
+        print(f"[SAVE_FILE] filename={filename}")
+        print(f"[SAVE_FILE] context_app={app}")
+
+        try:
+            result = save_file_via_os(app, filename)
+            print("[SAVE_FILE] executed successfully")
+            return ExecutionResult(
+                status="success",
+                message=f"Saved file as {filename}" if filename else "Opened save dialog",
+                intent="SAVE_FILE",
+                confidence=confidence,
+                data=result,
+            )
+        except Exception as e:
+            return ExecutionResult(
+                status="failed",
+                message=f"Failed to save file: {e}",
+                intent="SAVE_FILE",
+                confidence=confidence,
+                error_code="SAVE_FILE_FAILED",
+            )
     
     async def _execute_press_keys(self, slots: dict, confidence: float) -> ExecutionResult:
         """Execute PRESS_KEYS intent."""
