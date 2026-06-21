@@ -141,7 +141,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: AppTheme.primary.withOpacity(0.1),
+                            color: AppTheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: const Icon(
@@ -255,7 +255,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   Icon(
                     card.icon,
                     size: 32,
-                    color: AppTheme.textPrimary.withOpacity(0.8),
+                    color: AppTheme.textPrimary.withValues(alpha: 0.8),
                   ),
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),

@@ -1,5 +1,5 @@
 name: nova_mobile
-description: Stage 0 mobile client for Nova draw-to-action control.
+description: Rocket Phase 1 mobile client for voice, drawing, and braille input.
 publish_to: "none"
 version: 0.1.0+1
 
@@ -16,10 +16,8 @@ dependencies:
   flutter_tts: ^4.2.0
   # Vibration for haptic feedback
   vibration: ^2.0.0
-  # Provider for state management
-  provider: ^6.1.2
-  # HTTP client for /process and /confirm API calls
-  http: ^1.2.2
+  record: ^7.1.0
+  permission_handler: ^12.0.3
 
 dev_dependencies:
   flutter_test:

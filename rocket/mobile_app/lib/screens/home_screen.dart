@@ -6,8 +6,10 @@ import '../models/pairing_config.dart';
 import '../models/user_profile.dart';
 import '../services/nova_socket_service.dart';
 import '../widgets/quadrant_tile.dart';
+import 'braille_screen.dart';
 import 'drawing_screen.dart';
 import 'settings_screen.dart';
+import 'voice_screen.dart';
 
 enum HomeQuadrant {
   voice,
@@ -89,9 +91,9 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     final label = switch (quadrant) {
-      HomeQuadrant.voice => 'Voice mode. Double tap to enter command.',
-      HomeQuadrant.drawing => 'Drawing mode. Double tap to enter.',
-      HomeQuadrant.braille => 'Braille mode. Not available yet.',
+      HomeQuadrant.voice => 'Voice Mode. Double tap to continue.',
+      HomeQuadrant.drawing => 'Drawing Mode. Double tap to continue.',
+      HomeQuadrant.braille => 'Braille Mode. Double tap to continue.',
       HomeQuadrant.settings => 'Settings. Double tap to open.',
     };
     widget.socketService.tts.speakOnce(label);
@@ -103,7 +105,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     switch (quadrant) {
       case HomeQuadrant.voice:
-        await _promptVoiceCommand();
+        widget.socketService.tts.clearSpokenCache();
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => VoiceScreen(socketService: widget.socketService),
+          ),
+        );
+        _guidanceAnnounced = false;
+        widget.socketService.tts.clearSpokenCache();
         break;
 
       case HomeQuadrant.drawing:
@@ -133,59 +142,15 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
 
       case HomeQuadrant.braille:
-        widget.socketService.tts.speakOnce(
-          'This feature is coming soon. Please use drawing mode for now.',
-        );
-        widget.socketService.haptic.error();
-        break;
-    }
-  }
-
-  Future<void> _promptVoiceCommand() async {
-    final controller = TextEditingController();
-    final command = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Voice Command (Text Fallback)'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              hintText: 'Type a command, e.g. open chrome',
-            ),
-            onSubmitted: (value) => Navigator.of(context).pop(value),
+        widget.socketService.tts.clearSpokenCache();
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => BrailleScreen(socketService: widget.socketService),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(controller.text),
-              child: const Text('Send'),
-            ),
-          ],
         );
-      },
-    );
-
-    final text = command?.trim() ?? '';
-    if (text.isEmpty) {
-      widget.socketService.tts.speakOnce('No command entered.');
-      widget.socketService.haptic.tap();
-      return;
-    }
-
-    widget.socketService.haptic.executionStart();
-    widget.socketService.tts.speakFeedback('Processing command');
-
-    try {
-      await widget.socketService.processInputViaApi(text);
-    } catch (error) {
-      widget.socketService.tts.speakError('Command failed: $error');
-      widget.socketService.haptic.error();
+        _guidanceAnnounced = false;
+        widget.socketService.tts.clearSpokenCache();
+        break;
     }
   }
 
@@ -208,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: QuadrantTile(
                               title: 'Voice',
-                              subtitle: 'Text command API',
+                              subtitle: 'Record command',
                               icon: Icons.mic_none_rounded,
                               backgroundColor: AppTheme.cardVoice,
                               active: _selectedQuadrant == HomeQuadrant.voice,
@@ -236,7 +201,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: QuadrantTile(
                               title: 'Braille',
-                              subtitle: 'Coming soon',
+                              subtitle: 'Braille to task',
                               icon: Icons.blur_on_rounded,
                               backgroundColor: AppTheme.cardBraille,
                               active: _selectedQuadrant == HomeQuadrant.braille,
@@ -288,15 +253,15 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             decoration: BoxDecoration(
               color: connected
-                  ? AppTheme.success.withOpacity(0.1)
+                  ? AppTheme.success.withValues(alpha: 0.1)
                   : isPaired
-                      ? AppTheme.warning.withOpacity(0.1)
-                      : AppTheme.error.withOpacity(0.1),
+                      ? AppTheme.warning.withValues(alpha: 0.1)
+                      : AppTheme.error.withValues(alpha: 0.1),
               border: Border(
                 bottom: BorderSide(
                   color: connected
-                      ? AppTheme.success.withOpacity(0.2)
-                      : AppTheme.error.withOpacity(0.2),
+                      ? AppTheme.success.withValues(alpha: 0.2)
+                      : AppTheme.error.withValues(alpha: 0.2),
                   width: 1,
                 ),
               ),

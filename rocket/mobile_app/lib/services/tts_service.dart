@@ -35,15 +35,17 @@ class TtsService extends ChangeNotifier {
   bool _isSpeaking = false;
   bool _initialized = false;
   String? _currentText;
+  double _speechRate = 0.5;
 
   bool get isSpeaking => _isSpeaking;
   bool get isInitialized => _initialized;
   String? get currentText => _currentText;
+  double get speechRate => _speechRate;
 
   Future<void> _init() async {
     try {
       await _tts.setLanguage('en-US');
-      await _tts.setSpeechRate(0.5);
+      await _tts.setSpeechRate(_speechRate);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
 
@@ -147,6 +149,12 @@ class TtsService extends ChangeNotifier {
   /// Clear the queue but let current speech finish
   void clearQueue() {
     _queue.clear();
+  }
+
+  Future<void> setSpeechRate(double value) async {
+    _speechRate = value.clamp(0.2, 0.9);
+    await _tts.setSpeechRate(_speechRate);
+    notifyListeners();
   }
 
   /// Convenience methods

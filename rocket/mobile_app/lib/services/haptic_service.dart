@@ -57,8 +57,8 @@ class HapticService extends ChangeNotifier {
 
   Future<void> _init() async {
     try {
-      _hasVibrator = await Vibration.hasVibrator() ?? false;
-      _hasAmplitudeControl = await Vibration.hasAmplitudeControl() ?? false;
+      _hasVibrator = await Vibration.hasVibrator();
+      _hasAmplitudeControl = await Vibration.hasAmplitudeControl();
       _initialized = true;
       notifyListeners();
     } catch (e) {

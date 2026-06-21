@@ -27,283 +27,184 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    widget.socketService.tts.clearSpokenCache();
-    
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_announced) {
-        _announced = true;
-        final isPaired = widget.currentPairing != null;
-        widget.socketService.tts.speakOnce(
-          isPaired
-              ? 'Settings. Connected to ${widget.currentPairing!.ip}. '
-                'Double tap Scan QR to change connection.'
-              : 'Settings. Not connected. Double tap Scan QR to connect.',
-        );
-      }
+      if (_announced) return;
+      _announced = true;
+      final paired = widget.currentPairing != null;
+      widget.socketService.tts.speakOnce(
+        paired
+            ? 'Settings. Current connection ${widget.currentPairing!.ip}. Backend Nemotron with Pollinations fallback.'
+            : 'Settings. No desktop connected. Double tap scan desktop QR.',
+      );
     });
   }
 
-  Future<void> _scanQr(BuildContext context) async {
-    widget.socketService.tts.clearSpokenCache();
-    
-    final PairingConfig? config = await Navigator.of(context).push<PairingConfig>(
-      MaterialPageRoute<PairingConfig>(
+  Future<void> _scanQr() async {
+    await widget.socketService.tts.speakFeedback('Scanning QR code');
+    if (!mounted) return;
+    final config = await Navigator.of(context).push<PairingConfig>(
+      MaterialPageRoute(
         builder: (_) => QrPairingScreen(socketService: widget.socketService),
       ),
     );
-
+    if (!mounted) return;
     if (config == null) return;
-
-    // Immediately update pairing (this triggers backend sync in main.dart)
     await widget.onPairingChanged(config);
-    
-    if (!context.mounted) return;
-    
-    widget.socketService.tts.speakOnce('Connected to ${config.ip}');
-    widget.socketService.haptic.success();
+    if (!mounted) return;
+    await widget.socketService.tts.speakFeedback('Connection established');
+    await widget.socketService.haptic.success();
   }
 
-  void _reconnect() {
-    widget.socketService.connect();
-    widget.socketService.tts.speakOnce('Reconnecting');
-    widget.socketService.haptic.tap();
-  }
-
-  void _clearPairing() {
-    widget.onPairingChanged(null);
-    widget.socketService.tts.speakOnce('Connection cleared');
-    widget.socketService.haptic.tap();
+  Future<void> _clearPairing() async {
+    await widget.onPairingChanged(null);
+    await widget.socketService.tts.speakFeedback('Pairing cleared');
+    await widget.socketService.haptic.tap();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-        leading: Semantics(
-          button: true,
-          label: 'Go back',
-          child: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded),
-            color: AppTheme.textPrimary,
-            onPressed: () {
-              widget.socketService.haptic.tap();
-              Navigator.of(context).pop();
-            },
-          ),
-        ),
-        title: Text(
-          'Settings',
-          style: AppTheme.headingSmall.copyWith(
-            color: AppTheme.textPrimary,
-          ),
-        ),
-      ),
+      appBar: AppBar(title: const Text('Settings')),
       body: ListenableBuilder(
         listenable: widget.socketService,
         builder: (context, _) {
           return ListView(
             padding: const EdgeInsets.all(AppTheme.spacingL),
             children: [
-              // Connection status card
-              _buildCard(
-                title: 'Connection Status',
-                icon: widget.socketService.status == NovaConnectionStatus.connected
-                    ? Icons.wifi_rounded
-                    : Icons.wifi_off_rounded,
-                iconColor: widget.socketService.status == NovaConnectionStatus.connected
-                    ? AppTheme.success
-                    : AppTheme.error,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.socketService.statusLabel,
-                      style: AppTheme.bodyLarge.copyWith(
-                        color: widget.socketService.status == NovaConnectionStatus.connected
-                            ? AppTheme.success
-                            : AppTheme.error,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (widget.currentPairing != null) ...[
-                      const SizedBox(height: AppTheme.spacingS),
-                      Text(
-                        '${widget.currentPairing!.ip}:${widget.currentPairing!.port}',
-                        style: AppTheme.bodySmall,
-                      ),
-                    ],
-                  ],
-                ),
+              _InfoRow(label: 'Current connection', value: widget.socketService.statusLabel),
+              const _InfoRow(label: 'Device name', value: 'RocketTerminal'),
+              _InfoRow(label: 'IP', value: widget.currentPairing?.ip ?? 'Not paired'),
+              const _InfoRow(label: 'Backend', value: 'Nemotron'),
+              const _InfoRow(label: 'Fallback', value: 'Pollinations mistral-small-3.2'),
+              const SizedBox(height: AppTheme.spacingL),
+              const Text('Speech speed', style: AppTheme.headingSmall),
+              Slider(
+                value: widget.socketService.tts.speechRate,
+                min: 0.2,
+                max: 0.9,
+                divisions: 7,
+                label: widget.socketService.tts.speechRate.toStringAsFixed(1),
+                onChanged: (value) {
+                  widget.socketService.tts.setSpeechRate(value);
+                },
+                onChangeEnd: (_) {
+                  widget.socketService.tts.speakFeedback('Speech speed updated');
+                },
               ),
-              
               const SizedBox(height: AppTheme.spacingM),
-
-              // Pairing card
-              _buildCard(
-                title: 'Device Pairing',
+              _ActionButton(
+                label: 'Reconnect',
+                icon: Icons.sync_rounded,
+                onTap: () {
+                  widget.socketService.tts.speakOnce('Double tap to reconnect');
+                  widget.socketService.haptic.selection();
+                },
+                onDoubleTap: () {
+                  widget.socketService.connect();
+                  widget.socketService.tts.speakFeedback('Reconnecting');
+                },
+              ),
+              const SizedBox(height: AppTheme.spacingM),
+              _ActionButton(
+                label: 'Scan Desktop QR',
                 icon: Icons.qr_code_scanner_rounded,
-                iconColor: AppTheme.primary,
-                child: Text(
-                  widget.currentPairing == null
-                      ? 'No device paired. Scan a QR code to connect.'
-                      : 'Paired with desktop computer.',
-                  style: AppTheme.bodyMedium,
-                ),
+                onTap: () {
+                  widget.socketService.tts.speakOnce('Double tap to scan desktop QR');
+                  widget.socketService.haptic.selection();
+                },
+                onDoubleTap: _scanQr,
               ),
-
-              const SizedBox(height: AppTheme.spacingXL),
-
-              // Scan QR button (primary action)
-              Semantics(
-                button: true,
-                label: 'Scan QR code to connect',
-                child: GestureDetector(
-                  onTap: () {
-                    widget.socketService.tts.speakOnce('Double tap to scan');
-                    widget.socketService.haptic.selection();
-                  },
-                  onDoubleTap: () => _scanQr(context),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: AppTheme.primaryButtonDecoration,
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.qr_code_scanner_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                        SizedBox(width: AppTheme.spacingM),
-                        Text(
-                          'Scan Desktop QR',
-                          style: AppTheme.buttonText,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
               const SizedBox(height: AppTheme.spacingM),
-
-              // Reconnect button
-              Semantics(
-                button: true,
-                label: 'Reconnect to server',
-                child: GestureDetector(
-                  onTap: () {
-                    widget.socketService.tts.speakOnce('Double tap to reconnect');
-                    widget.socketService.haptic.selection();
-                  },
-                  onDoubleTap: _reconnect,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: AppTheme.secondaryButtonDecoration,
-                    child: Center(
-                      child: Text(
-                        'Reconnect',
-                        style: AppTheme.buttonText.copyWith(
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+              _ActionButton(
+                label: 'Clear Pairing',
+                icon: Icons.link_off_rounded,
+                onTap: () {
+                  widget.socketService.tts.speakOnce('Double tap to clear pairing');
+                  widget.socketService.haptic.selection();
+                },
+                onDoubleTap: _clearPairing,
+                destructive: true,
               ),
-
-              const SizedBox(height: AppTheme.spacingM),
-
-              // Clear pairing button
-              if (widget.currentPairing != null)
-                Semantics(
-                  button: true,
-                  label: 'Clear connection',
-                  child: GestureDetector(
-                    onTap: () {
-                      widget.socketService.tts.speakOnce('Double tap to clear');
-                      widget.socketService.haptic.selection();
-                    },
-                    onDoubleTap: _clearPairing,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.error.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: AppTheme.error.withOpacity(0.3),
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          'Clear Connection',
-                          style: AppTheme.buttonText.copyWith(
-                            color: AppTheme.error,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
             ],
           );
         },
       ),
     );
   }
+}
 
-  Widget _buildCard({
-    required String title,
-    required IconData icon,
-    required Color iconColor,
-    required Widget child,
-  }) {
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(AppTheme.spacingL),
-      decoration: AppTheme.cardDecoration(
-        backgroundColor: Colors.white,
-        hasShadow: true,
+      constraints: const BoxConstraints(minHeight: 72),
+      padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingS),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.black12)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              icon,
-              color: iconColor,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: AppTheme.spacingM),
+          Expanded(child: Text(label, style: AppTheme.bodyMedium)),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: AppTheme.bodySmall.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textMuted,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingS),
-                child,
-              ],
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: AppTheme.bodyLarge,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    required this.onDoubleTap,
+    this.destructive = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$label. Double tap to continue.',
+      child: GestureDetector(
+        onTap: onTap,
+        onDoubleTap: onDoubleTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 120),
+          decoration: BoxDecoration(
+            color: destructive ? AppTheme.error : AppTheme.textPrimary,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 28),
+              const SizedBox(width: AppTheme.spacingM),
+              Text(label, style: AppTheme.buttonText),
+            ],
+          ),
+        ),
       ),
     );
   }

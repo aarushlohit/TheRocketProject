@@ -95,7 +95,7 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
+                          color: Colors.black.withValues(alpha: 0.6),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -193,7 +193,7 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(AppTheme.spacingL),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
+                        color: Colors.black.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Column(
@@ -219,7 +219,7 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                           Text(
                             'Point your camera at the Rocket desktop QR code to connect.',
                             style: AppTheme.bodyMedium.copyWith(
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white.withValues(alpha: 0.9),
                             ),
                           ),
                         ],

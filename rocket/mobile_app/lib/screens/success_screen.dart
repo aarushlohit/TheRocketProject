@@ -146,11 +146,11 @@ class _SuccessScreenState extends State<SuccessScreen>
                         width: 140,
                         height: 140,
                         decoration: BoxDecoration(
-                          color: AppTheme.success.withOpacity(0.1),
+                          color: AppTheme.success.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: AppTheme.success.withOpacity(0.2),
+                              color: AppTheme.success.withValues(alpha: 0.2),
                               blurRadius: 30,
                               spreadRadius: 5,
                             ),
@@ -211,7 +211,7 @@ class _SuccessScreenState extends State<SuccessScreen>
                             width: 64,
                             height: 64,
                             decoration: BoxDecoration(
-                              color: AppTheme.primary.withOpacity(0.1),
+                              color: AppTheme.primary.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: Center(

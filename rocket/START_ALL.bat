@@ -1,26 +1,26 @@
 @echo off
 echo ========================================
-echo   Rocket - Starting Backend & Frontend
+echo   Rocket - Starting Terminal & Flutter App
 echo ========================================
 echo.
 
 cd /d "%~dp0"
 
-echo Starting Backend Server in new window...
-start "Rocket Backend" cmd /k start_backend.bat
+echo Starting RocketTerminal in new window...
+start "RocketTerminal" cmd /k start_backend.bat
 
 timeout /t 3 /nobreak >nul
 
-echo Starting Flutter Frontend in new window...
-start "Rocket Frontend" cmd /k start_frontend.bat
+echo Starting Flutter app in new window...
+start "Rocket Flutter" cmd /k start_frontend.bat
 
 echo.
 echo ========================================
-echo Both servers are starting!
+echo Rocket Phase 1 is starting.
 echo ========================================
 echo.
-echo Backend: ws://0.0.0.0:8765
-echo Frontend: Check the Flutter window
+echo Terminal: ws://0.0.0.0:8765
+echo Flutter: Check the Flutter window
 echo.
 echo Close this window if both servers started successfully.
 pause

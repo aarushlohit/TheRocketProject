@@ -48,7 +48,6 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
   AppState _appState = AppState.splash;
   PairingConfig? _pairingConfig;
   UserProfile? _userProfile;
-  bool _initialized = false;
 
   @override
   void initState() {
@@ -66,10 +65,7 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
   }
 
   void _onSocketStateChanged() {
-    // Handle pending confirmation
-    if (_socketService.pendingConfirmation != null) {
-      setState(() {});
-    }
+    setState(() {});
   }
 
   /// Called when splash screen finishes
@@ -92,8 +88,6 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
     setState(() {
       _pairingConfig = savedPairing;
       _userProfile = savedProfile;
-      _initialized = true;
-
       // Determine next screen
       if (!onboardingDone || savedProfile == null) {
         _appState = AppState.onboarding;
@@ -119,9 +113,6 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
       profile: profile,
       isOnboardingDone: true,
     );
-    if (_pairingConfig != null) {
-      _socketService.sendOnboarding(profile.selectionIds, announce: false);
-    }
   }
 
   /// Called when success countdown finishes
@@ -140,11 +131,6 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
       await _store.clear();
     } else {
       await _store.save(config);
-
-      // Immediately sync profile to backend
-      if (_userProfile != null) {
-        _socketService.sendOnboarding(_userProfile!.selectionIds);
-      }
     }
 
     await _socketService.setPairing(config);

@@ -35,6 +35,7 @@ class QuadrantTile extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           margin: const EdgeInsets.all(AppTheme.spacingS),
           padding: const EdgeInsets.all(AppTheme.spacingL),
+          constraints: const BoxConstraints(minHeight: 120),
           decoration: AppTheme.cardDecoration(
             backgroundColor: backgroundColor,
             isSelected: active,
@@ -46,7 +47,7 @@ class QuadrantTile extends StatelessWidget {
               Icon(
                 icon,
                 size: 34,
-                color: AppTheme.textPrimary.withOpacity(0.85),
+                color: AppTheme.textPrimary.withValues(alpha: 0.85),
               ),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

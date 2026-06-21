@@ -1,0 +1,1 @@
+"""QR pairing for RocketTerminal."""

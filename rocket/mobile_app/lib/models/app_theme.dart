@@ -6,29 +6,26 @@ class AppTheme {
 
   // ============ COLORS ============
   
-  /// Warm cream background
-  static const Color background = Color(0xFFF3EEE7);
+  static const Color background = Color(0xFFF7F8FA);
   
   /// Dark navy for text
   static const Color textPrimary = Color(0xFF1A1A2E);
   static const Color textSecondary = Color(0xFF4A4A5E);
   static const Color textMuted = Color(0xFF8A8A9E);
   
-  /// Burnt orange primary
-  static const Color primary = Color(0xFFBF6C2C);
-  static const Color primaryLight = Color(0xFFE8956A);
-  static const Color primaryDark = Color(0xFF8B4513);
+  static const Color primary = Color(0xFF005FCC);
+  static const Color primaryLight = Color(0xFF4C9AFF);
+  static const Color primaryDark = Color(0xFF003F8C);
   
   /// Success/Error colors
   static const Color success = Color(0xFF4CAF50);
   static const Color error = Color(0xFFE53935);
   static const Color warning = Color(0xFFFF9800);
   
-  /// Card backgrounds (soft pastels)
-  static const Color cardVoice = Color(0xFFE9F2FF);
-  static const Color cardDrawing = Color(0xFFFFF0DE);
-  static const Color cardBraille = Color(0xFFE3F5ED);
-  static const Color cardSettings = Color(0xFFF2E7FF);
+  static const Color cardVoice = Color(0xFFFFFFFF);
+  static const Color cardDrawing = Color(0xFFFFF7D6);
+  static const Color cardBraille = Color(0xFFE7F7EF);
+  static const Color cardSettings = Color(0xFFEAF1FF);
   
   /// Disability card colors
   static const Color cardVisual = Color(0xFFE8F5E9);
@@ -95,8 +92,8 @@ class AppTheme {
     bool hasShadow = true,
   }) {
     return BoxDecoration(
-      color: isSelected ? backgroundColor.withOpacity(0.95) : backgroundColor,
-      borderRadius: BorderRadius.circular(24),
+      color: isSelected ? backgroundColor.withValues(alpha: 0.95) : backgroundColor,
+      borderRadius: BorderRadius.circular(8),
       border: Border.all(
         color: isSelected ? primary : Colors.black12,
         width: isSelected ? 2.5 : 1.0,
@@ -104,7 +101,7 @@ class AppTheme {
       boxShadow: hasShadow
           ? [
               BoxShadow(
-                color: Colors.black.withOpacity(isSelected ? 0.08 : 0.05),
+                color: Colors.black.withValues(alpha: isSelected ? 0.08 : 0.05),
                 blurRadius: isSelected ? 20 : 12,
                 offset: const Offset(0, 6),
               ),
@@ -115,10 +112,10 @@ class AppTheme {
   
   static BoxDecoration primaryButtonDecoration = BoxDecoration(
     color: primary,
-    borderRadius: BorderRadius.circular(16),
+    borderRadius: BorderRadius.circular(8),
     boxShadow: [
       BoxShadow(
-        color: primary.withOpacity(0.35),
+        color: primary.withValues(alpha: 0.35),
         blurRadius: 16,
         offset: const Offset(0, 6),
       ),
@@ -127,7 +124,7 @@ class AppTheme {
   
   static BoxDecoration secondaryButtonDecoration = BoxDecoration(
     color: Colors.white,
-    borderRadius: BorderRadius.circular(16),
+    borderRadius: BorderRadius.circular(8),
     border: Border.all(color: primary, width: 2),
   );
 
