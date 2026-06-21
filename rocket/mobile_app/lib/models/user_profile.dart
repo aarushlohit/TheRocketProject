@@ -10,25 +10,25 @@ enum DisabilityType {
 
 extension DisabilityTypeExtension on DisabilityType {
   String get label => switch (this) {
-    DisabilityType.visual => 'I can see',
-    DisabilityType.hearing => 'I can hear',
-    DisabilityType.motor => 'I have difficulty touching',
-    DisabilityType.cognitive => 'I need simple guidance',
-  };
+        DisabilityType.visual => 'Voice guidance',
+        DisabilityType.hearing => 'Haptic guidance',
+        DisabilityType.motor => 'Large controls',
+        DisabilityType.cognitive => 'Simple mode',
+      };
 
   String get description => switch (this) {
-    DisabilityType.visual => 'Use visual guidance and standard touch controls',
-    DisabilityType.hearing => 'Voice guidance works well for me',
-    DisabilityType.motor => 'Use larger touch targets and simpler gestures',
-    DisabilityType.cognitive => 'Use clearer prompts and a simpler flow',
-  };
+        DisabilityType.visual => 'Speak every important action aloud',
+        DisabilityType.hearing => 'Use vibration feedback for actions',
+        DisabilityType.motor => 'Use bigger controls and simpler gestures',
+        DisabilityType.cognitive => 'Use shorter prompts and simpler screens',
+      };
 
   int get id => switch (this) {
-    DisabilityType.visual => 1,
-    DisabilityType.hearing => 2,
-    DisabilityType.motor => 3,
-    DisabilityType.cognitive => 4,
-  };
+        DisabilityType.visual => 1,
+        DisabilityType.hearing => 2,
+        DisabilityType.motor => 3,
+        DisabilityType.cognitive => 4,
+      };
 }
 
 /// User accessibility profile

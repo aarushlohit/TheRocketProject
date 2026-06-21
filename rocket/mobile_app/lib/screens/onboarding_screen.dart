@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../models/app_theme.dart';
 import '../models/user_profile.dart';
 import '../services/haptic_service.dart';
 import '../services/tts_service.dart';
 
-/// Disability selection card data
-class _DisabilityCard {
-  const _DisabilityCard({
+class _GuidanceOption {
+  const _GuidanceOption({
     required this.type,
     required this.icon,
     required this.color,
@@ -19,7 +17,6 @@ class _DisabilityCard {
   final Color color;
 }
 
-/// Elegant onboarding screen for disability selection
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({
     required this.ttsService,
@@ -37,29 +34,34 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  final Set<DisabilityType> _selected = {};
-  bool _announced = false;
+  final Set<DisabilityType> _selected = {
+    DisabilityType.visual,
+    DisabilityType.hearing,
+    DisabilityType.motor,
+  };
+  int _page = 0;
+  bool _completionScheduled = false;
 
-  static const List<_DisabilityCard> _cards = [
-    _DisabilityCard(
+  static const List<_GuidanceOption> _options = [
+    _GuidanceOption(
       type: DisabilityType.visual,
-      icon: Icons.visibility_rounded,
+      icon: Icons.record_voice_over_rounded,
       color: AppTheme.cardVisual,
     ),
-    _DisabilityCard(
+    _GuidanceOption(
       type: DisabilityType.hearing,
-      icon: Icons.hearing_rounded,
+      icon: Icons.vibration_rounded,
       color: AppTheme.cardHearing,
     ),
-    _DisabilityCard(
-      type: DisabilityType.motor,
-      icon: Icons.accessibility_new_rounded,
-      color: AppTheme.cardMotor,
-    ),
-    _DisabilityCard(
+    _GuidanceOption(
       type: DisabilityType.cognitive,
-      icon: Icons.psychology_rounded,
+      icon: Icons.lightbulb_outline_rounded,
       color: AppTheme.cardCognitive,
+    ),
+    _GuidanceOption(
+      type: DisabilityType.motor,
+      icon: Icons.touch_app_rounded,
+      color: AppTheme.cardMotor,
     ),
   ];
 
@@ -67,55 +69,69 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_announced) {
-        _announced = true;
-        widget.ttsService.speakOnce(
-          'Welcome to Rocket. Tell me how you want guidance. '
-          'You can choose one or more options. Tap to select, double tap to continue.',
-        );
-      }
+      widget.ttsService.speakOnce(
+        'Welcome to Rocket. Double tap to continue.',
+      );
+      widget.hapticService.executionStart();
     });
   }
 
-  void _toggleSelection(DisabilityType type) {
+  void _goNext() {
+    widget.hapticService.tap();
+    if (_page == 0) {
+      setState(() => _page = 1);
+      widget.ttsService.speakOnce(
+        'Choose preferred guidance. Double tap each option to select or remove it.',
+      );
+      return;
+    }
+
+    if (_page == 1) {
+      setState(() => _page = 2);
+      widget.ttsService.speakOnce('Setup complete. Launching Rocket.');
+      _scheduleComplete();
+    }
+  }
+
+  void _scheduleComplete() {
+    if (_completionScheduled) return;
+    _completionScheduled = true;
+    Future<void>.delayed(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      final profile = UserProfile(
+        disabilities: _selected,
+        voiceFeedback: _selected.contains(DisabilityType.visual),
+        hapticFeedback: _selected.contains(DisabilityType.hearing),
+        confirmationRequired: true,
+        onboardingCompleted: true,
+      );
+      widget.hapticService.success();
+      widget.onComplete(profile);
+    });
+  }
+
+  void _toggleOption(DisabilityType type) {
     setState(() {
       if (_selected.contains(type)) {
         _selected.remove(type);
-        widget.ttsService.speakOnce('${type.label} deselected');
       } else {
         _selected.add(type);
-        widget.ttsService.speakOnce('${type.label} selected');
       }
     });
-    widget.hapticService.tap();
-  }
-
-  void _announceCard(DisabilityType type) {
     final isSelected = _selected.contains(type);
     widget.ttsService.speakOnce(
-      '${type.label}. ${type.description}. '
-      '${isSelected ? "Selected" : "Not selected"}. Tap to toggle.',
+      '${type.label} ${isSelected ? "selected" : "removed"}.',
     );
     widget.hapticService.selection();
   }
 
-  void _onContinue() {
-    if (_selected.isEmpty) {
-      widget.ttsService.speak('Please select at least one option');
-      widget.hapticService.error();
-      return;
-    }
-
-    final profile = UserProfile(
-      disabilities: _selected,
-      voiceFeedback: true,
-      hapticFeedback: true,
-      confirmationRequired: true,
-      onboardingCompleted: true,
+  void _focusOption(DisabilityType type) {
+    final isSelected = _selected.contains(type);
+    widget.ttsService.speakOnce(
+      '${type.label}. ${type.description}. '
+      '${isSelected ? "Selected" : "Not selected"}. Double tap to change.',
     );
-
-    widget.hapticService.success();
-    widget.onComplete(profile);
+    widget.hapticService.selection();
   }
 
   @override
@@ -123,180 +139,224 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AppTheme.spacingL),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: AppTheme.spacingL),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: switch (_page) {
+            0 => _buildWelcome(),
+            1 => _buildGuidance(),
+            _ => _buildComplete(),
+          },
+        ),
+      ),
+    );
+  }
 
-              // Header
-              Semantics(
-                header: true,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: const Icon(
-                            Icons.rocket_launch_rounded,
-                            color: AppTheme.primary,
-                            size: 28,
-                          ),
-                        ),
-                        const SizedBox(width: AppTheme.spacingM),
-                        const Text('Rocket', style: AppTheme.headingMedium),
-                      ],
-                    ),
-                    const SizedBox(height: AppTheme.spacingL),
-                    const Text(
-                      'Tell Rocket\nHow To Help',
-                      style: AppTheme.headingLarge,
-                    ),
-                    const SizedBox(height: AppTheme.spacingS),
-                    Text(
-                      'Choose one or more options that match how you want to use the app',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.textMuted,
+  Widget _buildWelcome() {
+    return Padding(
+      key: const ValueKey('welcome'),
+      padding: const EdgeInsets.all(AppTheme.spacingL),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Spacer(),
+          Semantics(
+            header: true,
+            label: 'Rocket Logo. Welcome to Rocket.',
+            child: Center(
+              child: Container(
+                width: 128,
+                height: 128,
+                decoration: const BoxDecoration(
+                  color: AppTheme.primary,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.rocket_launch_rounded,
+                  color: Colors.white,
+                  size: 72,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppTheme.spacingXL),
+          const Text('Welcome to Rocket', style: AppTheme.headingLarge),
+          const SizedBox(height: AppTheme.spacingM),
+          Text(
+            'Rocket helps blind users control computers.',
+            style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
+          ),
+          const Spacer(),
+          _DoubleTapButton(
+            label: 'Double tap to continue',
+            semanticLabel: 'Double tap to continue',
+            onTap: () {
+              widget.ttsService.speakOnce('Double tap to continue.');
+              widget.hapticService.selection();
+            },
+            onDoubleTap: _goNext,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGuidance() {
+    return Padding(
+      key: const ValueKey('guidance'),
+      padding: const EdgeInsets.all(AppTheme.spacingL),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            header: true,
+            child: const Text(
+              'Choose preferred guidance',
+              style: AppTheme.headingLarge,
+            ),
+          ),
+          const SizedBox(height: AppTheme.spacingS),
+          Text(
+            'Multiple selections are allowed.',
+            style: AppTheme.bodyLarge.copyWith(color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: AppTheme.spacingL),
+          Expanded(
+            child: GridView.count(
+              crossAxisCount: 2,
+              mainAxisSpacing: AppTheme.spacingM,
+              crossAxisSpacing: AppTheme.spacingM,
+              childAspectRatio: 0.92,
+              children: _options.map((option) {
+                final isSelected = _selected.contains(option.type);
+                return Semantics(
+                  button: true,
+                  selected: isSelected,
+                  label: '${option.type.label}. ${option.type.description}. '
+                      '${isSelected ? "Selected" : "Not selected"}.',
+                  hint: 'Double tap to change selection.',
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _focusOption(option.type),
+                    onDoubleTap: () => _toggleOption(option.type),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      padding: const EdgeInsets.all(AppTheme.spacingM),
+                      decoration: AppTheme.cardDecoration(
+                        backgroundColor: option.color,
+                        isSelected: isSelected,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: AppTheme.spacingXL),
-
-              // Disability cards grid
-              Expanded(
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: AppTheme.spacingM,
-                  crossAxisSpacing: AppTheme.spacingM,
-                  childAspectRatio: 1.0,
-                  children: _cards.map((card) {
-                    final isSelected = _selected.contains(card.type);
-                    return _buildCard(card, isSelected);
-                  }).toList(),
-                ),
-              ),
-
-              const SizedBox(height: AppTheme.spacingL),
-
-              // Continue button
-              Semantics(
-                button: true,
-                label: 'Continue with ${_selected.length} options selected',
-                child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.mediumImpact();
-                    widget.ttsService.speakOnce('Double tap to continue');
-                  },
-                  onDoubleTap: _onContinue,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: _selected.isEmpty
-                        ? AppTheme.secondaryButtonDecoration
-                        : AppTheme.primaryButtonDecoration,
-                    child: Center(
-                      child: Text(
-                        _selected.isEmpty
-                            ? 'Select options to continue'
-                            : 'Continue',
-                        style: AppTheme.buttonText.copyWith(
-                          color: _selected.isEmpty
-                              ? AppTheme.primary
-                              : Colors.white,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Icon(option.icon, size: 34),
+                              Icon(
+                                isSelected
+                                    ? Icons.check_circle_rounded
+                                    : Icons.radio_button_unchecked_rounded,
+                                color: isSelected
+                                    ? AppTheme.primary
+                                    : AppTheme.textMuted,
+                                size: 30,
+                              ),
+                            ],
+                          ),
+                          Text(
+                            option.type.label,
+                            style: AppTheme.headingSmall,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
                     ),
                   ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: AppTheme.spacingM),
+          _DoubleTapButton(
+            label: 'Double tap to continue',
+            semanticLabel: '${_selected.length} guidance options selected. '
+                'Double tap to continue.',
+            onTap: () {
+              widget.ttsService.speakOnce('Double tap to continue.');
+              widget.hapticService.selection();
+            },
+            onDoubleTap: _goNext,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildComplete() {
+    return Padding(
+      key: const ValueKey('complete'),
+      padding: const EdgeInsets.all(AppTheme.spacingL),
+      child: Center(
+        child: Semantics(
+          liveRegion: true,
+          header: true,
+          label: 'Setup complete. Launching Rocket.',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.check_circle_rounded,
+                color: AppTheme.success,
+                size: 96,
+              ),
+              const SizedBox(height: AppTheme.spacingL),
+              const Text('Setup complete', style: AppTheme.headingLarge),
+              const SizedBox(height: AppTheme.spacingS),
+              Text(
+                'Launching Rocket.',
+                style: AppTheme.bodyLarge.copyWith(
+                  color: AppTheme.textSecondary,
                 ),
               ),
-
-              const SizedBox(height: AppTheme.spacingM),
             ],
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildCard(_DisabilityCard card, bool isSelected) {
+class _DoubleTapButton extends StatelessWidget {
+  const _DoubleTapButton({
+    required this.label,
+    required this.semanticLabel,
+    required this.onTap,
+    required this.onDoubleTap,
+  });
+
+  final String label;
+  final String semanticLabel;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+
+  @override
+  Widget build(BuildContext context) {
     return Semantics(
-      selected: isSelected,
       button: true,
-      label: '${card.type.label}. ${card.type.description}. '
-          '${isSelected ? "Selected" : "Not selected"}',
+      label: semanticLabel,
+      hint: 'Single tap hears this button. Double tap activates it.',
       child: GestureDetector(
-        onTap: () => _toggleSelection(card.type),
-        onLongPress: () => _announceCard(card.type),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          decoration: AppTheme.cardDecoration(
-            backgroundColor: card.color,
-            isSelected: isSelected,
-          ),
-          padding: const EdgeInsets.all(AppTheme.spacingL),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Icon(
-                    card.icon,
-                    size: 32,
-                    color: AppTheme.textPrimary.withValues(alpha: 0.8),
-                  ),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: isSelected ? AppTheme.primary : Colors.transparent,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isSelected ? AppTheme.primary : AppTheme.textMuted,
-                        width: 2,
-                      ),
-                    ),
-                    child: isSelected
-                        ? const Icon(
-                            Icons.check,
-                            size: 18,
-                            color: Colors.white,
-                          )
-                        : null,
-                  ),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    card.type.label,
-                    style: AppTheme.headingSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    card.type.description,
-                    style: AppTheme.bodySmall,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ],
-          ),
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        onDoubleTap: onDoubleTap,
+        child: Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: 120),
+          alignment: Alignment.center,
+          decoration: AppTheme.primaryButtonDecoration,
+          child: Text(label, style: AppTheme.buttonText),
         ),
       ),
     );

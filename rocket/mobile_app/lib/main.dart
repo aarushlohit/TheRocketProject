@@ -5,9 +5,6 @@ import 'models/app_theme.dart';
 import 'models/pairing_config.dart';
 import 'models/user_profile.dart';
 import 'screens/home_screen.dart';
-import 'screens/onboarding_screen.dart';
-import 'screens/splash_screen.dart';
-import 'screens/success_screen.dart';
 import 'services/haptic_service.dart';
 import 'services/nova_socket_service.dart';
 import 'services/pairing_store.dart';
@@ -24,14 +21,6 @@ void main() {
   runApp(const RocketApp());
 }
 
-/// App navigation state
-enum AppState {
-  splash,
-  onboarding,
-  success,
-  home,
-}
-
 class RocketApp extends StatefulWidget {
   const RocketApp({super.key});
 
@@ -45,7 +34,6 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
   late final HapticService _hapticService;
   late final NovaSocketService _socketService;
 
-  AppState _appState = AppState.splash;
   PairingConfig? _pairingConfig;
   UserProfile? _userProfile;
 
@@ -62,15 +50,11 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
     );
 
     _socketService.addListener(_onSocketStateChanged);
+    _bootstrap();
   }
 
   void _onSocketStateChanged() {
     setState(() {});
-  }
-
-  /// Called when splash screen finishes
-  void _onSplashComplete() {
-    _bootstrap();
   }
 
   /// Load saved data and determine initial screen
@@ -88,41 +72,10 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
     setState(() {
       _pairingConfig = savedPairing;
       _userProfile = savedProfile;
-      // Determine next screen
-      if (!onboardingDone || savedProfile == null) {
-        _appState = AppState.onboarding;
-      } else {
-        _appState = AppState.home;
-        // Connect if paired
-        if (savedPairing != null) {
-          _socketService.setPairing(savedPairing);
-        }
+      if (savedPairing != null) {
+        _socketService.setPairing(savedPairing);
       }
     });
-  }
-
-  /// Called when user completes onboarding
-  void _onOnboardingComplete(UserProfile profile) {
-    setState(() {
-      _userProfile = profile;
-      _appState = AppState.success;
-    });
-
-    _store.saveProfile(profile);
-    _socketService.setLocalOnboardingState(
-      profile: profile,
-      isOnboardingDone: true,
-    );
-  }
-
-  /// Called when success countdown finishes
-  void _onSuccessComplete() {
-    setState(() {
-      _appState = AppState.home;
-    });
-
-    // Clear TTS cache for fresh home experience
-    _ttsService.clearSpokenCache();
   }
 
   /// Update pairing config (from QR scan)
@@ -162,29 +115,12 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
       title: 'Rocket',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeData,
-      home: _buildCurrentScreen(),
+      home: HomeScreen(
+        socketService: _socketService,
+        pairingConfig: _pairingConfig,
+        userProfile: _userProfile,
+        onPairingChanged: _updatePairing,
+      ),
     );
-  }
-
-  Widget _buildCurrentScreen() {
-    return switch (_appState) {
-      AppState.splash => SplashScreen(onComplete: _onSplashComplete),
-      AppState.onboarding => OnboardingScreen(
-          ttsService: _ttsService,
-          hapticService: _hapticService,
-          onComplete: _onOnboardingComplete,
-        ),
-      AppState.success => SuccessScreen(
-          ttsService: _ttsService,
-          hapticService: _hapticService,
-          onComplete: _onSuccessComplete,
-        ),
-      AppState.home => HomeScreen(
-          socketService: _socketService,
-          pairingConfig: _pairingConfig,
-          userProfile: _userProfile,
-          onPairingChanged: _updatePairing,
-        ),
-    };
   }
 }

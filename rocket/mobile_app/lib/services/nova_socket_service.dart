@@ -41,8 +41,8 @@ class NovaSocketService extends ChangeNotifier {
   NovaSocketService({
     TtsService? ttsService,
     HapticService? hapticService,
-  }) : _tts = ttsService ?? TtsService(),
-       _haptic = hapticService ?? HapticService();
+  })  : _tts = ttsService ?? TtsService(),
+        _haptic = hapticService ?? HapticService();
 
   final TtsService _tts;
   final HapticService _haptic;
@@ -104,12 +104,10 @@ class NovaSocketService extends ChangeNotifier {
         : NovaConnectionStatus.reconnecting);
 
     try {
+      debugPrint('[RocketSocket] Connecting to ${_config!.websocketUrl}');
       final socket = await WebSocket.connect(_config!.websocketUrl);
       _socket = socket;
-      _updateStatus(NovaConnectionStatus.connected);
       _startPingTimer();
-      await _tts.speakFeedback('Connection established');
-      await _haptic.success();
       socket.listen(
         _handleMessage,
         onDone: _handleSocketClosed,
@@ -117,6 +115,7 @@ class NovaSocketService extends ChangeNotifier {
         cancelOnError: true,
       );
     } catch (error) {
+      debugPrint('[RocketSocket] Connect failed: $error');
       _lastResponse = {'type': 'error', 'message': 'Connection failed: $error'};
       _updateStatus(NovaConnectionStatus.error);
       await _tts.speakError('Connection failed');
@@ -196,7 +195,10 @@ class NovaSocketService extends ChangeNotifier {
       final type = decoded['type']?.toString();
 
       if (type == 'connected') {
-        _tts.speakFeedback(decoded['message']?.toString() ?? 'Connection established');
+        _updateStatus(NovaConnectionStatus.connected);
+        _tts.speakFeedback(
+            decoded['message']?.toString() ?? 'Connection established');
+        _haptic.success();
         if (_localOnboardingDone && _localProfile != null) {
           debugPrint('[Rocket] Local accessibility profile active.');
         }
@@ -206,17 +208,30 @@ class NovaSocketService extends ChangeNotifier {
         _haptic.success();
         announceTaskSent();
       } else if (type == 'error') {
-        _tts.speakError(decoded['message']?.toString() ?? 'Rocket error');
+        final message = decoded['message']?.toString() ?? 'Rocket error';
+        debugPrint('[RocketSocket] Server error: $message');
+        if (message.toLowerCase().contains('token')) {
+          _shouldReconnect = false;
+          _socket = null;
+          _pingTimer?.cancel();
+          _updateStatus(NovaConnectionStatus.error);
+        }
+        _tts.speakError(message);
         _haptic.error();
       }
       notifyListeners();
     } on FormatException {
-      _lastResponse = {'type': 'error', 'message': 'Server returned invalid data'};
+      _lastResponse = {
+        'type': 'error',
+        'message': 'Server returned invalid data'
+      };
       notifyListeners();
     }
   }
 
   void _handleSocketClosed() {
+    debugPrint(
+        '[RocketSocket] Socket closed. shouldReconnect=$_shouldReconnect');
     _socket = null;
     _pingTimer?.cancel();
     if (_shouldReconnect) {
@@ -228,6 +243,7 @@ class NovaSocketService extends ChangeNotifier {
   }
 
   void _handleSocketError(Object error) {
+    debugPrint('[RocketSocket] Socket error: $error');
     _lastResponse = {'type': 'error', 'message': 'Socket error: $error'};
     _socket = null;
     _pingTimer?.cancel();

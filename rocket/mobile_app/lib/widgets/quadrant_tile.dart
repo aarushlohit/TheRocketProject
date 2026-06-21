@@ -5,69 +5,66 @@ import '../models/app_theme.dart';
 class QuadrantTile extends StatelessWidget {
   const QuadrantTile({
     required this.title,
-    required this.subtitle,
     required this.onTap,
     required this.onDoubleTap,
-    required this.active,
     required this.backgroundColor,
-    required this.icon,
+    this.icon,
+    this.symbol,
     super.key,
   });
 
   final String title;
-  final String subtitle;
   final VoidCallback onTap;
   final VoidCallback onDoubleTap;
-  final bool active;
   final Color backgroundColor;
-  final IconData icon;
+  final IconData? icon;
+  final String? symbol;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: '$title. $subtitle',
+      label: '$title. Double tap to enter.',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         onDoubleTap: onDoubleTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          margin: const EdgeInsets.all(AppTheme.spacingS),
-          padding: const EdgeInsets.all(AppTheme.spacingL),
-          constraints: const BoxConstraints(minHeight: 120),
-          decoration: AppTheme.cardDecoration(
-            backgroundColor: backgroundColor,
-            isSelected: active,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: <Widget>[
-              Icon(
-                icon,
-                size: 34,
-                color: AppTheme.textPrimary.withValues(alpha: 0.85),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: Container(
+          color: backgroundColor,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Text(
-                    title,
-                    style: AppTheme.headingMedium,
-                  ),
-                  const SizedBox(height: AppTheme.spacingS),
-                  Text(
-                    subtitle,
-                    style: AppTheme.bodySmall.copyWith(
-                      height: 1.35,
+                  if (symbol != null)
+                    Text(
+                      symbol!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 76,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    )
+                  else
+                    Icon(
+                      icon,
+                      size: 76,
+                      color: Colors.white,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  const SizedBox(height: AppTheme.spacingM),
+                  Text(
+                    title.toUpperCase(),
+                    style: AppTheme.headingMedium.copyWith(
+                      color: Colors.white,
+                      fontSize: 28,
+                    ),
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),

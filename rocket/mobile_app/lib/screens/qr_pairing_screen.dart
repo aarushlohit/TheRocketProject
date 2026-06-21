@@ -24,12 +24,12 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
   @override
   void initState() {
     super.initState();
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_announced) {
         _announced = true;
         widget.socketService.tts.speakOnce(
-          'QR scanner active. Point camera at desktop QR code. '
+          'Scanning QR code. Point camera at desktop QR code. '
           'Double tap close button to cancel.',
         );
         widget.socketService.haptic.executionStart();
@@ -48,11 +48,10 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
     try {
       final PairingConfig config = PairingConfig.fromQrPayload(rawValue);
       _handled = true;
-      
-      // Success feedback
-      widget.socketService.tts.speakOnce('QR code detected. Connecting.');
+
+      widget.socketService.tts.speakOnce('QR recognized. Pairing successful.');
       widget.socketService.haptic.success();
-      
+
       Navigator.of(context).pop(config);
     } on FormatException catch (error) {
       widget.socketService.tts.speakOnce('Invalid QR code. ${error.message}');
@@ -85,7 +84,8 @@ class _QrPairingScreenState extends State<QrPairingScreen> {
                     label: 'Close scanner',
                     child: GestureDetector(
                       onTap: () {
-                        widget.socketService.tts.speakOnce('Double tap to close');
+                        widget.socketService.tts
+                            .speakOnce('Double tap to close');
                         widget.socketService.haptic.selection();
                       },
                       onDoubleTap: () {

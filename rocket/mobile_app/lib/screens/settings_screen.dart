@@ -51,7 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (config == null) return;
     await widget.onPairingChanged(config);
     if (!mounted) return;
-    await widget.socketService.tts.speakFeedback('Connection established');
+    await widget.socketService.tts.speakFeedback('Pairing successful');
     await widget.socketService.haptic.success();
   }
 
@@ -69,64 +69,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListenableBuilder(
         listenable: widget.socketService,
         builder: (context, _) {
-          return ListView(
-            padding: const EdgeInsets.all(AppTheme.spacingL),
-            children: [
-              _InfoRow(label: 'Current connection', value: widget.socketService.statusLabel),
-              const _InfoRow(label: 'Device name', value: 'RocketTerminal'),
-              _InfoRow(label: 'IP', value: widget.currentPairing?.ip ?? 'Not paired'),
-              const _InfoRow(label: 'Backend', value: 'Nemotron'),
-              const _InfoRow(label: 'Fallback', value: 'Pollinations mistral-small-3.2'),
-              const SizedBox(height: AppTheme.spacingL),
-              const Text('Speech speed', style: AppTheme.headingSmall),
-              Slider(
-                value: widget.socketService.tts.speechRate,
-                min: 0.2,
-                max: 0.9,
-                divisions: 7,
-                label: widget.socketService.tts.speechRate.toStringAsFixed(1),
-                onChanged: (value) {
-                  widget.socketService.tts.setSpeechRate(value);
-                },
-                onChangeEnd: (_) {
-                  widget.socketService.tts.speakFeedback('Speech speed updated');
-                },
-              ),
-              const SizedBox(height: AppTheme.spacingM),
-              _ActionButton(
-                label: 'Reconnect',
-                icon: Icons.sync_rounded,
-                onTap: () {
-                  widget.socketService.tts.speakOnce('Double tap to reconnect');
-                  widget.socketService.haptic.selection();
-                },
-                onDoubleTap: () {
-                  widget.socketService.connect();
-                  widget.socketService.tts.speakFeedback('Reconnecting');
-                },
-              ),
-              const SizedBox(height: AppTheme.spacingM),
-              _ActionButton(
-                label: 'Scan Desktop QR',
-                icon: Icons.qr_code_scanner_rounded,
-                onTap: () {
-                  widget.socketService.tts.speakOnce('Double tap to scan desktop QR');
-                  widget.socketService.haptic.selection();
-                },
-                onDoubleTap: _scanQr,
-              ),
-              const SizedBox(height: AppTheme.spacingM),
-              _ActionButton(
-                label: 'Clear Pairing',
-                icon: Icons.link_off_rounded,
-                onTap: () {
-                  widget.socketService.tts.speakOnce('Double tap to clear pairing');
-                  widget.socketService.haptic.selection();
-                },
-                onDoubleTap: _clearPairing,
-                destructive: true,
-              ),
-            ],
+          return Padding(
+            padding: const EdgeInsets.all(AppTheme.spacingM),
+            child: Column(
+              children: [
+                _InfoRow(
+                  label: 'Desktop Pairing',
+                  value:
+                      widget.currentPairing == null ? 'Not paired' : 'Paired',
+                ),
+                _InfoRow(
+                  label: 'Connection State',
+                  value: widget.socketService.statusLabel,
+                ),
+                const _InfoRow(label: 'Backend', value: 'Nemotron'),
+                const SizedBox(height: AppTheme.spacingS),
+                const Text('Speech Speed', style: AppTheme.headingSmall),
+                Slider(
+                  semanticFormatterCallback: (value) =>
+                      'Speech speed ${value.toStringAsFixed(1)}',
+                  value: widget.socketService.tts.speechRate,
+                  min: 0.2,
+                  max: 0.9,
+                  divisions: 7,
+                  label: widget.socketService.tts.speechRate.toStringAsFixed(1),
+                  onChanged: (value) {
+                    widget.socketService.tts.setSpeechRate(value);
+                  },
+                  onChangeEnd: (_) {
+                    widget.socketService.tts
+                        .speakFeedback('Speech speed updated');
+                  },
+                ),
+                const SizedBox(height: AppTheme.spacingS),
+                _ActionButton(
+                  label: 'QR Scan',
+                  icon: Icons.qr_code_scanner_rounded,
+                  onTap: () {
+                    widget.socketService.tts.speakOnce('Double tap QR scan');
+                  },
+                  onDoubleTap: _scanQr,
+                ),
+                const SizedBox(height: AppTheme.spacingS),
+                _ActionButton(
+                  label: 'Reconnect',
+                  icon: Icons.sync_rounded,
+                  onTap: () {
+                    widget.socketService.tts.speakOnce('Double tap reconnect');
+                  },
+                  onDoubleTap: () {
+                    widget.socketService.connect();
+                    widget.socketService.tts.speakFeedback('Reconnecting');
+                  },
+                ),
+                const SizedBox(height: AppTheme.spacingS),
+                _ActionButton(
+                  label: 'Clear Pairing',
+                  icon: Icons.link_off_rounded,
+                  onTap: () {
+                    widget.socketService.tts
+                        .speakOnce('Double tap clear pairing');
+                  },
+                  onDoubleTap: _clearPairing,
+                  destructive: true,
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -146,8 +154,8 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 72),
-      padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingS),
+      constraints: const BoxConstraints(minHeight: 52),
+      padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingXS),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.black12)),
       ),
@@ -191,7 +199,7 @@ class _ActionButton extends StatelessWidget {
         onTap: onTap,
         onDoubleTap: onDoubleTap,
         child: Container(
-          constraints: const BoxConstraints(minHeight: 120),
+          constraints: const BoxConstraints(minHeight: 72),
           decoration: BoxDecoration(
             color: destructive ? AppTheme.error : AppTheme.textPrimary,
             borderRadius: BorderRadius.circular(18),
@@ -200,7 +208,7 @@ class _ActionButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icon, color: Colors.white, size: 28),
-              const SizedBox(width: AppTheme.spacingM),
+              const SizedBox(width: AppTheme.spacingS),
               Text(label, style: AppTheme.buttonText),
             ],
           ),
