@@ -42,3 +42,12 @@
 - OpenWork untouched.
 - Terminal untouched.
 - Implementation stopped after UI refactor.
+
+## Rocket V4.1 Braille Polish
+
+- Rocket V4.1 Braille polish complete.
+- Braille pipeline unchanged.
+- Backend unchanged.
+- Nemotron unchanged.
+- Terminal unchanged.
+- OpenWork untouched.
