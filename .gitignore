@@ -81,3 +81,13 @@ Thumbs.db
 .env.local
 config.local.yaml
 .opencode
+
+# Rocket app runtime/generated state
+rocket/.env
+rocket/.opencode/
+rocket/.playwright-mcp/
+rocket/.venv/
+rocket/data/
+rocket/logs/
+rocket/backend_start.log
+rocket/backend_start.err
