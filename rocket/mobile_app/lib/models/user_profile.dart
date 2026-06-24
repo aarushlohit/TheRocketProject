@@ -188,9 +188,10 @@ class UserProfile {
       browser: json['browser']?.toString() ?? 'default',
       editor: json['editor']?.toString() ?? 'code',
       speechSpeed: json['speech_speed']?.toString() ?? 'normal',
-      accessibilityMode: json['accessibility_mode']?.toString() ?? 'blind-first',
+      accessibilityMode:
+          json['accessibility_mode']?.toString() ?? 'blind-first',
       trustLevel: json['trust_level']?.toString() ?? 'trusted',
-      accessMode: json['access_mode']?.toString() ?? 'workspace',
+      accessMode: 'workspace',
       credentialMode:
           json['credential_mode']?.toString() ?? 'already_configured',
       workspacePath: json['workspace_path']?.toString() ?? '',

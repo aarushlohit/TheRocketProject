@@ -37,6 +37,38 @@ class RocketTask {
   }
 }
 
+class RocketExecutionResult {
+  const RocketExecutionResult({
+    required this.task,
+    required this.success,
+    required this.executor,
+    required this.message,
+    required this.verification,
+  });
+
+  final String task;
+  final bool success;
+  final String executor;
+  final String message;
+  final String verification;
+
+  factory RocketExecutionResult.fromJson(Map<String, dynamic> json) {
+    return RocketExecutionResult(
+      task: json['task']?.toString() ?? '',
+      success: json['success'] == true,
+      executor: json['executor']?.toString() ?? 'rocket-runtime',
+      message: json['message']?.toString() ?? '',
+      verification: json['verification']?.toString() ?? '',
+    );
+  }
+
+  String get spokenMessage {
+    final prefix = success ? 'Completed.' : 'Failed.';
+    final evidence = verification.trim().isEmpty ? message : verification;
+    return '$prefix $evidence';
+  }
+}
+
 class NovaSocketService extends ChangeNotifier {
   NovaSocketService({
     TtsService? ttsService,
@@ -54,12 +86,16 @@ class NovaSocketService extends ChangeNotifier {
   NovaConnectionStatus _status = NovaConnectionStatus.disconnected;
   bool _shouldReconnect = false;
   RocketTask? _lastTask;
+  RocketExecutionResult? _lastExecutionResult;
+  String? _lastTryAgainMessage;
   Map<String, dynamic>? _lastResponse;
   UserProfile? _localProfile;
   bool _localOnboardingDone = false;
 
   PairingConfig? get config => _config;
   RocketTask? get lastTask => _lastTask;
+  RocketExecutionResult? get lastExecutionResult => _lastExecutionResult;
+  String? get lastTryAgainMessage => _lastTryAgainMessage;
   Map<String, dynamic>? get lastResponse => _lastResponse;
   NovaConnectionStatus get status => _status;
   TtsService get tts => _tts;
@@ -87,6 +123,8 @@ class NovaSocketService extends ChangeNotifier {
     _config = config;
     _lastResponse = null;
     _lastTask = null;
+    _lastExecutionResult = null;
+    _lastTryAgainMessage = null;
     if (_config != null) {
       _shouldReconnect = true;
       unawaited(connect());
@@ -224,6 +262,20 @@ class NovaSocketService extends ChangeNotifier {
         _tts.speakResult('Task generated. ${_lastTask!.task}');
         _haptic.success();
         announceTaskSent();
+      } else if (type == 'execution_result') {
+        _lastExecutionResult = RocketExecutionResult.fromJson(decoded);
+        if (_lastExecutionResult!.success) {
+          _tts.speakResult(_lastExecutionResult!.spokenMessage);
+          _haptic.success();
+        } else {
+          _tts.speakError(_lastExecutionResult!.spokenMessage);
+          _haptic.error();
+        }
+      } else if (type == 'try_again') {
+        _lastTryAgainMessage = decoded['message']?.toString() ??
+            'I could not understand. Please try again.';
+        _tts.speakError(_lastTryAgainMessage!);
+        _haptic.error();
       } else if (type == 'error') {
         final message = decoded['message']?.toString() ?? 'Rocket error';
         debugPrint('[RocketSocket] Server error: $message');

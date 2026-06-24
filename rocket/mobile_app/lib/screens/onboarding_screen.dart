@@ -35,7 +35,8 @@ class OnboardingScreen extends StatefulWidget {
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _preferredNameController = TextEditingController();
+  final TextEditingController _preferredNameController =
+      TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
@@ -48,9 +49,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       TextEditingController(text: 'normal');
   final TextEditingController _trustLevelController =
       TextEditingController(text: 'trusted');
-  final TextEditingController _accessModeController =
-      TextEditingController(text: 'workspace');
-  final TextEditingController _workspacePathController = TextEditingController();
+  final TextEditingController _workspacePathController =
+      TextEditingController();
   final TextEditingController _gmailRefController = TextEditingController();
   final TextEditingController _githubRefController = TextEditingController();
   final TextEditingController _youtubeRefController = TextEditingController();
@@ -103,7 +103,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _editorController.dispose();
     _speechSpeedController.dispose();
     _trustLevelController.dispose();
-    _accessModeController.dispose();
     _workspacePathController.dispose();
     _gmailRefController.dispose();
     _githubRefController.dispose();
@@ -175,9 +174,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         trustLevel: _trustLevelController.text.trim().isEmpty
             ? 'trusted'
             : _trustLevelController.text.trim(),
-        accessMode: _accessModeController.text.trim().toLowerCase() == 'full'
-            ? 'full'
-            : 'workspace',
+        accessMode: 'workspace',
         credentialMode: _credentialMode,
         workspacePath: _workspacePathController.text.trim(),
         credentialRefs:
@@ -325,10 +322,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   controller: _trustLevelController,
                 ),
                 _ProfileField(
-                  label: 'Access mode',
-                  controller: _accessModeController,
-                ),
-                _ProfileField(
                   label: 'Workspace path',
                   controller: _workspacePathController,
                 ),
@@ -366,7 +359,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             label: 'Double tap to continue',
             semanticLabel: 'Profile details ready. Double tap to continue.',
             onTap: () {
-              widget.ttsService.speakOnce('Profile details. Double tap to continue.');
+              widget.ttsService
+                  .speakOnce('Profile details. Double tap to continue.');
               widget.hapticService.selection();
             },
             onDoubleTap: _goNext,

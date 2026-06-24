@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -34,10 +35,17 @@ class _VoiceScreenState extends State<VoiceScreen> {
   bool _sending = false;
   String? _path;
   String? _lastSpokenTask;
+  RocketExecutionResult? _lastExecutionResult;
+  String? _lastTryAgainMessage;
+  Map<String, dynamic>? _lastResponse;
+  Timer? _sendTimeout;
 
   @override
   void initState() {
     super.initState();
+    _lastExecutionResult = widget.socketService.lastExecutionResult;
+    _lastTryAgainMessage = widget.socketService.lastTryAgainMessage;
+    _lastResponse = widget.socketService.lastResponse;
     widget.socketService.addListener(_handleSocketUpdate);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.socketService.tts.speakOnce('Voice mode. Double tap to start.');
@@ -47,22 +55,46 @@ class _VoiceScreenState extends State<VoiceScreen> {
   @override
   void dispose() {
     widget.socketService.removeListener(_handleSocketUpdate);
+    _sendTimeout?.cancel();
     _recorder.dispose();
     super.dispose();
   }
 
   void _handleSocketUpdate() {
     final task = widget.socketService.lastTask;
-    if (task == null ||
-        task.source != 'voice' ||
-        task.task == _lastSpokenTask) {
+    if (task != null &&
+        task.source == 'voice' &&
+        task.task != _lastSpokenTask) {
+      _lastSpokenTask = task.task;
+      _sendTimeout?.cancel();
+      if (mounted) {
+        setState(() => _state = _VoiceState.sent);
+      }
+      widget.socketService.tts.speakResult('Task sent. Waiting for result.');
+      widget.socketService.haptic.success();
+    }
+
+    final result = widget.socketService.lastExecutionResult;
+    if (result != null && result != _lastExecutionResult) {
+      _lastExecutionResult = result;
+      _finishInteraction();
       return;
     }
-    _lastSpokenTask = task.task;
-    if (!mounted) return;
-    setState(() => _state = _VoiceState.sent);
-    widget.socketService.tts.speakResult('Task sent');
-    widget.socketService.haptic.success();
+
+    final tryAgain = widget.socketService.lastTryAgainMessage;
+    if (tryAgain != null && tryAgain != _lastTryAgainMessage) {
+      _lastTryAgainMessage = tryAgain;
+      _finishInteraction();
+      return;
+    }
+
+    final response = widget.socketService.lastResponse;
+    if (response != null &&
+        response != _lastResponse &&
+        response['type']?.toString() == 'error') {
+      _lastResponse = response;
+      _finishInteraction();
+    }
   }
 
   Future<void> _startRecording() async {
@@ -120,6 +152,8 @@ class _VoiceScreenState extends State<VoiceScreen> {
     try {
       final bytes = await File(path).readAsBytes();
       await widget.socketService.sendAudio(Uint8List.fromList(bytes));
+      _startSendTimeout();
+      if (mounted) setState(() => _state = _VoiceState.sent);
     } catch (error) {
       await widget.socketService.tts.speakError('Voice send failed: $error');
       await widget.socketService.haptic.error();
@@ -133,7 +167,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
         _VoiceState.idle => 'Idle',
         _VoiceState.listening => 'Listening...',
         _VoiceState.processing => _sending ? 'Sending...' : 'Processing...',
-        _VoiceState.sent => 'Sending...',
+        _VoiceState.sent => 'Waiting for result...',
       };
 
   Color get _buttonColor => switch (_state) {
@@ -142,6 +176,27 @@ class _VoiceScreenState extends State<VoiceScreen> {
         _VoiceState.sent => AppTheme.success,
         _ => AppTheme.textPrimary,
       };
+
+  void _startSendTimeout() {
+    _sendTimeout?.cancel();
+    _sendTimeout = Timer(const Duration(seconds: 90), () {
+      if (!mounted) return;
+      setState(() => _state = _VoiceState.idle);
+      widget.socketService.tts
+          .speakError('No final result yet. Please try again.');
+      widget.socketService.haptic.error();
+    });
+  }
+
+  void _finishInteraction() {
+    _sendTimeout?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      _recording = false;
+      _state = _VoiceState.idle;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

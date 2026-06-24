@@ -26,10 +26,14 @@ class _BrailleScreenState extends State<BrailleScreen> {
   bool _twoFingerEraseHandled = false;
   int? _selectedCell;
   String? _lastSpokenTask;
+  RocketExecutionResult? _lastExecutionResult;
+  String? _lastTryAgainMessage;
 
   @override
   void initState() {
     super.initState();
+    _lastExecutionResult = widget.socketService.lastExecutionResult;
+    _lastTryAgainMessage = widget.socketService.lastTryAgainMessage;
     widget.socketService.addListener(_handleSocketUpdate);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.socketService.tts.speakOnce('Braille mode.');
@@ -44,14 +48,25 @@ class _BrailleScreenState extends State<BrailleScreen> {
 
   void _handleSocketUpdate() {
     final task = widget.socketService.lastTask;
-    if (task == null ||
-        task.source != 'braille' ||
-        task.task == _lastSpokenTask) {
-      return;
+    if (task != null &&
+        task.source == 'braille' &&
+        task.task != _lastSpokenTask) {
+      _lastSpokenTask = task.task;
+      widget.socketService.tts.speakResult('Intent recognized. ${task.task}');
+      widget.socketService.tts.speakFeedback('Task sent');
     }
-    _lastSpokenTask = task.task;
-    widget.socketService.tts.speakResult('Intent recognized. ${task.task}');
-    widget.socketService.tts.speakFeedback('Task sent');
+
+    final result = widget.socketService.lastExecutionResult;
+    if (result != null && result != _lastExecutionResult) {
+      _lastExecutionResult = result;
+      if (mounted) setState(() => _sending = false);
+    }
+
+    final tryAgain = widget.socketService.lastTryAgainMessage;
+    if (tryAgain != null && tryAgain != _lastTryAgainMessage) {
+      _lastTryAgainMessage = tryAgain;
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   String _dotName(int dot) {

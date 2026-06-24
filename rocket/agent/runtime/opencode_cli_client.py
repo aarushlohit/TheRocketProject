@@ -54,9 +54,6 @@ class OpenCodeCliClient:
         self.model = self.models[0]
         self.timeout_seconds = _configured_timeout()
         self.print_logs = os.getenv("ROCKET_OPENCODE_PRINT_LOGS", "1").strip().lower() not in {"0", "false", "no"}
-        self.desktop_skip_permissions = (
-            os.getenv("ROCKET_OPENCODE_DESKTOP_SKIP_PERMISSIONS", "1").strip().lower() not in {"0", "false", "no"}
-        )
         self.persistent_server = (
             os.getenv("ROCKET_OPENCODE_PERSISTENT_SERVER", "1").strip().lower() not in {"0", "false", "no"}
         )
@@ -79,6 +76,11 @@ class OpenCodeCliClient:
         last_result: RocketExecutionResult | None = None
         for model in self.models:
             result = self._execute_once(task, prompt, model, desktop_expectation)
+            if _is_verification_failure(result):
+                correction_prompt = _correction_prompt(prompt, result)
+                corrected = self._execute_once(task, correction_prompt, model, desktop_expectation)
+                corrected.details.append("correction_attempted=true")
+                return corrected
             if result.success or not _should_try_next_model(result):
                 return result
             last_result = result
@@ -113,8 +115,7 @@ class OpenCodeCliClient:
             command.extend(["--session", self.session_id])
         if self.print_logs:
             command.extend(["--print-logs", "--log-level", os.getenv("ROCKET_OPENCODE_LOG_LEVEL", "INFO")])
-        if self.setup.full_access or (self.desktop_skip_permissions and desktop_expectation):
-            command.append("--dangerously-skip-permissions")
+        command.append("--dangerously-skip-permissions")
         env = os.environ.copy()
         env.update(self.runtime_env)
         try:
@@ -470,6 +471,24 @@ def _should_try_next_model(result: RocketExecutionResult) -> bool:
         "temporarily unavailable",
     )
     return any(marker in text for marker in retry_markers)
+
+
+def _is_verification_failure(result: RocketExecutionResult) -> bool:
+    if result.success:
+        return False
+    text = "\n".join([result.message, *result.details]).lower()
+    return "could not verify" in text or "not visible after opencode returned" in text
+
+
+def _correction_prompt(prompt: str, result: RocketExecutionResult) -> str:
+    return (
+        f"{prompt}\n\n"
+        "Correction attempt required:\n"
+        f"Previous final message: {result.message}\n"
+        "Rocket could not verify the desktop state. Do exactly one focused corrective action, "
+        "then verify with visible window/process/browser evidence. Do not explain. Do not repeat "
+        "the same failed action unless the observed state proves it is needed.\n"
+    )
 
 
 def _desktop_expectation(task: str) -> dict[str, str] | None:

@@ -61,8 +61,7 @@ class RocketSetup:
 
 
 def _access_mode(value: str) -> str:
-    normalized = value.strip().lower()
-    return "full" if normalized == "full" else "workspace"
+    return "workspace"
 
 
 def _credential_mode(value: str) -> str:

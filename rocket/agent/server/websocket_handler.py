@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import socket
 import time
@@ -14,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 import websockets
 
 from agent.adapters.nemotron import NemotronAdapter
+from agent.server.task_quality import assess_task_quality
 from agent.terminal.rocket_terminal import RocketTerminal
 
 
@@ -124,6 +126,20 @@ class RocketWebSocketServer:
         started: float,
     ) -> None:
         latency_ms = int((time.perf_counter() - started) * 1000)
+        quality = assess_task_quality(task)
+        if not quality.accepted:
+            self.terminal.error(f"{client_id}: Try again requested for {source}: {quality.message}")
+            await _send(
+                websocket,
+                {
+                    "type": "try_again",
+                    "source": source,
+                    "message": quality.message,
+                    "latency_ms": latency_ms,
+                },
+            )
+            return
+
         self.terminal.received_task(client_id=client_id, source=source, task=task, latency_ms=latency_ms)
         await _send(
             websocket,
@@ -133,6 +149,17 @@ class RocketWebSocketServer:
                 "task": task,
                 "latency_ms": latency_ms,
                 "message": "Task generated",
+            },
+        )
+        execute_task = getattr(self.terminal, "execute_task", None)
+        if not callable(execute_task):
+            return
+        result = await asyncio.to_thread(execute_task, client_id, task)
+        await _send(
+            websocket,
+            {
+                "type": "execution_result",
+                **result,
             },
         )
 

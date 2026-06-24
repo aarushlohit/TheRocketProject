@@ -6,9 +6,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from subprocess import CompletedProcess
 
 from agent.runtime.opencode_runtime import OpenCodeRuntimeManager
 from agent.runtime.setup import RocketSetup
+from agent.server.task_quality import assess_task_quality
 from agent.runtime.opencode_cli_client import (
     DEFAULT_OPENCODE_MODELS,
     OpenCodeCliClient,
@@ -61,6 +63,36 @@ class OpenCodeRuntimeTests(unittest.TestCase):
         self.assertEqual(_desktop_expectation("Open WhatsApp")["process"], "whatsapp")  # type: ignore[index]
         self.assertIsNone(_desktop_expectation("Create a file in workspace"))
 
+    def test_opencode_always_skips_permissions_for_cli_runtime(self) -> None:
+        client = OpenCodeCliClient(Path.cwd(), profile=RocketProfile())
+
+        def fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
+            self.assertIn("--dangerously-skip-permissions", command)
+            return CompletedProcess(command, 0, stdout='{"message":"ok"}\n', stderr="")
+
+        with (
+            patch.object(client, "available", return_value=True),
+            patch("agent.runtime.opencode_cli_client._ensure_opencode_server", return_value=""),
+            patch("agent.runtime.opencode_cli_client.subprocess.run", side_effect=fake_run),
+        ):
+            result = client.execute("Create a file in workspace")
+
+        self.assertTrue(result.success)
+
+    def test_task_quality_rejects_meaningless_input(self) -> None:
+        self.assertFalse(assess_task_quality("").accepted)
+        self.assertFalse(assess_task_quality("unknown").accepted)
+        self.assertFalse(assess_task_quality("maybe open something").accepted)
+        self.assertFalse(assess_task_quality("aa").accepted)
+        self.assertFalse(assess_task_quality("open").accepted)
+        self.assertTrue(assess_task_quality("Open Chrome").accepted)
+
+    def test_setup_normalizes_access_mode_to_workspace_root(self) -> None:
+        setup = RocketSetup.from_dict({"access_mode": "full"})
+
+        self.assertEqual(setup.access_mode, "workspace")
+        self.assertFalse(setup.full_access)
+
     def test_opencode_run_message_stays_short(self) -> None:
         message = _short_run_message("Open YouTube and search for cat videos. " * 50)
 
@@ -102,6 +134,7 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             report = OpenCodeRuntimeManager(root_path / "data", setup).ensure_ready()
 
             merged = json.loads((config_dir / "opencode.json").read_text(encoding="utf-8"))
+            self.assertEqual(merged["permission"], "allow")
             self.assertEqual(merged["mcp"]["github"]["command"], ["custom-github"])
             self.assertIn("rocket-windows", merged["mcp"])
             self.assertIn("windows_mcp.py", " ".join(merged["mcp"]["rocket-windows"]["command"]))
