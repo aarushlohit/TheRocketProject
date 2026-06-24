@@ -13,4 +13,4 @@ Out of scope:
 - Confirming dangerous actions.
 - Automating Windows, browsers, files, or applications.
 - Keeping memories or long-running plans.
-- Modifying OpenWork.
+- Modifying OpenCode internals.

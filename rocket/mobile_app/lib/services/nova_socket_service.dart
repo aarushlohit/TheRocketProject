@@ -201,6 +201,23 @@ class NovaSocketService extends ChangeNotifier {
         _haptic.success();
         if (_localOnboardingDone && _localProfile != null) {
           debugPrint('[Rocket] Local accessibility profile active.');
+          _sendJson({
+            'type': 'profile',
+            'profile': _localProfile!.toJson(),
+            'system_prompt':
+                'Blind-first. Context-aware intent. Prefer installed apps. Keep follow-up commands inside the active app.',
+          });
+          _sendJson({
+            'type': 'setup',
+            'setup': {
+              'setup_complete': _localProfile!.onboardingCompleted,
+              'access_mode': _localProfile!.accessMode,
+              'credential_mode': _localProfile!.credentialMode,
+              'workspace_path': _localProfile!.workspacePath,
+              'credential_refs': _localProfile!.credentialRefs,
+              'backup_enabled': _localProfile!.backupEnabled,
+            },
+          });
         }
       } else if (type == 'task') {
         _lastTask = RocketTask.fromJson(decoded);

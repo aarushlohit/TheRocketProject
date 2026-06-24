@@ -1,10 +1,13 @@
 # Rocket V3 Phase 1
 
 loguru==0.7.3
+chromadb==1.5.9
 openai==2.14.0
+pywinauto==0.6.9
 PyYAML==6.0.3
 qrcode==8.2
 requests==2.33.1
 rich==14.2.0
 typer==0.20.0
+uiautomation==2.0.29
 websockets==16.0

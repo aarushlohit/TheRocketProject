@@ -1,27 +1,26 @@
-# Rocket V3 Phase 1 Report
+# Rocket Runtime Report
 
-Rocket was refactored from a partially working automation agent into a Phase 1 perception bridge.
+Rocket is now an OpenCode-only blind-first control bridge.
 
-Implemented:
+## Implemented
 
-- Flutter app remains the active mobile client.
-- Voice, Drawing, Braille, and Settings are first-class home actions.
-- Single tap speaks. Double tap continues.
-- Voice records audio and sends it to RocketTerminal.
-- Drawing renders PNG and sends it to RocketTerminal.
-- Braille sends text/cells to RocketTerminal.
-- RocketTerminal displays generated tasks and latency.
-- Nemotron is primary.
-- Pollinations `mistral-small-3.2` is fallback.
-- OpenWork is vendored for Phase 2 only.
+- Flutter onboarding, QR pairing, voice, drawing, and Braille capture.
+- Nemotron intent parsing with recent task and runtime context.
+- RocketTerminal task display and background runtime execution.
+- Global OpenCode powers sync from `C:\Users\Aarush\shokunin-opencode-powers`.
+- OpenCode CLI execution with workspace/full access mode behavior.
+- DPAPI-backed Rocket vault for migrated MCP env secrets.
+- Backend tests for runtime config and context behavior.
 
-Not implemented by design:
+## Current Runtime
 
-- Execution.
-- Automation.
-- Windows control.
-- Browser control.
-- Verification.
-- Memory.
-- MCP.
-- Skills.
+```text
+Mobile input
+  -> WebSocket
+  -> Nemotron intent
+  -> RocketTerminal
+  -> agent.runtime
+  -> OpenCode CLI
+```
+
+OpenWork is no longer part of the active runtime.

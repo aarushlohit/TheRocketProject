@@ -2,32 +2,40 @@
 
 ```text
 Flutter App
-  -> Input Capture
-      -> Voice
-      -> Drawing
-      -> Braille
-  -> Websocket
-  -> RocketTerminal
-  -> Nemotron Omni
-  -> RocketParser Prompt
-  -> Executable Task
-  -> Display in RocketTerminal
-  -> OpenWork in Phase 2
+  -> Voice / Drawing / Braille capture
+  -> WebSocket
+  -> Nemotron Omni intent parser
+  -> Context-enriched executable task
+  -> RocketTerminal display
+  -> OpenCode runtime verifier
+  -> OpenCode CLI
+  -> MCP / skills / memory / desktop automation
 ```
 
-Frozen Phase 1 boundary:
+## Runtime Boundary
 
-- No automation.
-- No execution.
-- No deterministic planner.
-- No verifier.
-- No task DAG.
-- No OS control.
-- No browser control.
-- No memory.
+Rocket keeps perception and execution separate:
 
-Vendored Phase 2 dependency:
+- Phase 1 turns user input into one executable task.
+- Runtime setup verifies global OpenCode powers before execution.
+- Execution uses OpenCode CLI only.
+- Shokunin memory and Rocket memory provide persistent context.
+- Workspace mode is the default first-run access mode.
 
-- `external/openwork`
-- Stored only.
-- Not patched, built, started, or integrated in Phase 1.
+## OpenCode Powers
+
+Rocket treats `C:\Users\Aarush\shokunin-opencode-powers` as the source package and `C:\Users\Aarush\.config\opencode` as the global OpenCode config directory.
+
+The verifier syncs:
+
+- `plugins/superpowers.js`
+- `skills/superpowers`
+- `~\.shokunin\memory\mcp-server.py`
+- `~\.shokunin\scripts\chroma-helper.py`
+- missing MCP entries from the powers package config
+
+## Secrets
+
+Credentials must not live in plaintext `opencode.json`. Rocket migrates real-looking MCP env secrets into the local DPAPI-backed vault and passes them to OpenCode through the subprocess environment.
+
+Rotate any token that was previously stored directly in `opencode.json`.

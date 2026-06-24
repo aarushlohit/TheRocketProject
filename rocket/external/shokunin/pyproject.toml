@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shokunin-memory"
+version = "4.2.3"
+description = "Shokunin AI Ecosystem - Persistent Memory System"
+requires-python = ">=3.11"
+dependencies = [
+    "chromadb>=0.4.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "SIM", "PL"]
+ignore = [
+    "E501",
+    "PLR2004", "PLR0911", "PLR0912", "PLR0913", "PLR0915",
+    "PLW0603", "PLW1510", "PLW2901",
+    "SIM108", "SIM103", "SIM114",
+    "N806", "N803",
+    "UP017",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+show_error_codes = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = "chromadb.*"
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

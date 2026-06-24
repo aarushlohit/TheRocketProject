@@ -70,6 +70,30 @@ class RocketWebSocketServer:
             if message_type == "ping":
                 await _send(websocket, {"type": "pong", "status": "alive"})
                 return
+            if message_type == "profile":
+                profile = message.get("profile") if isinstance(message.get("profile"), dict) else {}
+                system_prompt = str(message.get("system_prompt", ""))
+                self.adapter.set_profile_context(profile, system_prompt)
+                apply_profile = getattr(self.terminal, "apply_profile", None)
+                if callable(apply_profile):
+                    apply_profile(profile)
+                await _send(websocket, {"type": "profile", "status": "received"})
+                return
+            if message_type == "setup":
+                setup = message.get("setup") if isinstance(message.get("setup"), dict) else {}
+                self.adapter.set_runtime_context(setup)
+                apply_setup = getattr(self.terminal, "apply_setup", None)
+                if callable(apply_setup):
+                    apply_setup(setup)
+                await _send(websocket, {"type": "setup", "status": "received"})
+                return
+            if message_type == "permission_response":
+                response = message.get("response") if isinstance(message.get("response"), dict) else {}
+                permission_response = getattr(self.terminal, "permission_response", None)
+                if callable(permission_response):
+                    permission_response(response)
+                await _send(websocket, {"type": "permission_response", "status": "received"})
+                return
             if message_type == "audio":
                 audio_bytes = _decode_base64(message.get("data"))
                 task = await self.adapter.process_audio(audio_bytes)

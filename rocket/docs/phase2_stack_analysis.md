@@ -1,5 +1,7 @@
 # Phase 2 Stack Analysis
 
+Status: historical research. The selected runtime is now OpenCode CLI only; see `docs/stack_decision.md`.
+
 Goal: choose the smallest practical stack that gives Rocket roughly 90-95% blind-first desktop automation capability without installing 20 frameworks.
 
 ## Evaluation Table

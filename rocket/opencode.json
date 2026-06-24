@@ -1,0 +1,101 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/deepseek-v4-flash-free",
+  "small_model": "opencode/north-mini-code-free",
+  "enabled_providers": [
+    "nvidia"
+  ],
+  "provider": {
+    "nvidia": {
+      "api": "https://integrate.api.nvidia.com/v1",
+      "env": [
+        "NVIDIA_API_KEY"
+      ],
+      "options": {
+        "timeout": 600000
+      },
+      "models": {
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
+          "name": "Nemotron 3 Nano Omni 30B A3B Reasoning",
+          "tool_call": true,
+          "reasoning": true,
+          "temperature": true,
+          "limit": {
+            "context": 128000,
+            "output": 8192
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "filesystem": {
+      "type": "local",
+      "command": [
+        "npx.cmd",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ],
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx.cmd",
+        "-y",
+        "@playwright/mcp@latest",
+        "--isolated",
+        "--executable-path",
+        "C:\\Users\\Aarush\\AppData\\Local\\ms-playwright\\chromium-1228\\chrome-win64\\chrome.exe"
+      ],
+      "enabled": true
+    },
+    "memory": {
+      "type": "local",
+      "command": [
+        "python",
+        "-m",
+        "agent.phase2.memory_mcp"
+      ],
+      "enabled": true
+    },
+    "shokunin_memory": {
+      "type": "local",
+      "command": [
+        "python",
+        "-m",
+        "agent.phase2.shokunin_mcp"
+      ],
+      "enabled": true
+    },
+    "windows": {
+      "type": "local",
+      "command": [
+        "npx.cmd",
+        "-y",
+        "@darbotlabs/darbot-windows-mcp"
+      ],
+      "enabled": false
+    },
+    "google-workspace": {
+      "type": "local",
+      "command": [
+        "npx.cmd",
+        "-y",
+        "google-tools-mcp"
+      ],
+      "enabled": true
+    }
+  }
+}

@@ -5,6 +5,7 @@ import 'models/app_theme.dart';
 import 'models/pairing_config.dart';
 import 'models/user_profile.dart';
 import 'screens/home_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'services/haptic_service.dart';
 import 'services/nova_socket_service.dart';
 import 'services/pairing_store.dart';
@@ -36,6 +37,8 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
 
   PairingConfig? _pairingConfig;
   UserProfile? _userProfile;
+  bool _bootstrapped = false;
+  bool _onboardingComplete = false;
 
   @override
   void initState() {
@@ -72,6 +75,8 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
     setState(() {
       _pairingConfig = savedPairing;
       _userProfile = savedProfile;
+      _onboardingComplete = onboardingDone && (savedProfile?.onboardingCompleted ?? false);
+      _bootstrapped = true;
       if (savedPairing != null) {
         _socketService.setPairing(savedPairing);
       }
@@ -115,12 +120,36 @@ class _RocketAppState extends State<RocketApp> with WidgetsBindingObserver {
       title: 'Rocket',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeData,
-      home: HomeScreen(
-        socketService: _socketService,
-        pairingConfig: _pairingConfig,
-        userProfile: _userProfile,
-        onPairingChanged: _updatePairing,
-      ),
+      home: !_bootstrapped
+          ? const Scaffold(
+              backgroundColor: AppTheme.background,
+              body: Center(child: CircularProgressIndicator()),
+            )
+          : !_onboardingComplete
+              ? OnboardingScreen(
+                  ttsService: _ttsService,
+                  hapticService: _hapticService,
+                  onComplete: _completeOnboarding,
+                )
+              : HomeScreen(
+                  socketService: _socketService,
+                  pairingConfig: _pairingConfig,
+                  userProfile: _userProfile,
+                  onPairingChanged: _updatePairing,
+                ),
     );
+  }
+
+  Future<void> _completeOnboarding(UserProfile profile) async {
+    await _store.saveProfile(profile);
+    _socketService.setLocalOnboardingState(
+      profile: profile,
+      isOnboardingDone: true,
+    );
+    if (!mounted) return;
+    setState(() {
+      _userProfile = profile;
+      _onboardingComplete = true;
+    });
   }
 }

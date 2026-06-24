@@ -1,61 +1,23 @@
 # Bootstrap Report
 
-Status: plan only. Bootstrap was not implemented or run.
+Rocket bootstrap now means OpenCode powers verification.
 
-## Proposed Bootstrap
+## Verified Assets
 
-```text
-Rocket Bootstrap
-Installing Memory...
-Installing Skills...
-Installing MCP...
-Installing Prompt...
-Installing OAuth...
-Collecting Profile...
-Done.
-```
+- `C:\Users\Aarush\.config\opencode\opencode.json`
+- `C:\Users\Aarush\.config\opencode\plugins\superpowers.js`
+- `C:\Users\Aarush\.config\opencode\skills\superpowers`
+- `C:\Users\Aarush\.shokunin\memory\mcp-server.py`
+- `C:\Users\Aarush\.shokunin\scripts\chroma-helper.py`
 
-## One-Time Marker
+## Behavior
 
-```json
-{
-  "rocket_initialized": true,
-  "version": "phase2",
-  "completed_at": "<iso timestamp>"
-}
-```
+- Missing MCP entries are merged from `C:\Users\Aarush\shokunin-opencode-powers\opencode.json`.
+- Existing customized MCP entries are preserved.
+- Full access sets OpenCode permission to `allow`.
+- Workspace mode sets OpenCode permission to `ask` and runs CLI tasks inside the configured workspace.
+- Real-looking MCP env secrets are migrated into `data/rocket/phase2/RocketVault.json`.
 
-## Proposed Stores
+## Security
 
-| Store | Purpose |
-|---|---|
-| `data/rocket/bootstrap_state.json` | One-time marker. |
-| `data/rocket/RocketProfile.db` | Encrypted user profile. |
-| `prompts/rocket_system.txt` | Rocket execution policy. |
-| `prompts/rocket_intent.txt` | Intent domain routing examples. |
-| `rocket_skills/` | Rocket-specific skills. |
-
-## Security Position
-
-- Use DPAPI-protected key material on Windows.
-- Use AES-256 for profile database content.
-- Keep OAuth terminal-only.
-- Pin all MCP package versions.
-- Ask only for high-risk actions under trusted mode.
-
-## Not Done
-
-- No bootstrap code.
-- No profile database.
-- No OAuth flow.
-- No MCP install.
-- No skills install.
-- No OpenWork modification.
-
-## Failure Assumptions
-
-- OpenWork may fail, so RocketAdapter must fall back to RocketAgent.
-- Shokunin may fail, so memory must fall back to RocketMemory.
-- Playwright MCP may fail, so browser automation must fall back to native Playwright.
-- pywinauto may fail, so desktop automation must fall back to Python UIAutomation.
-- Skills may fail, so Rocket must keep a tiny local verifier/recovery path.
+Do not keep real tokens in `opencode.json`. Rotate any token that was already stored there in plaintext.

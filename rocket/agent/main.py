@@ -10,6 +10,7 @@ import typer
 
 from agent.adapters.nemotron import NemotronAdapter
 from agent.adapters.pollinations import PollinationsAdapter
+from agent.runtime import RocketAdapter, RuntimeTerminalBridge, rocket_bootstrap
 from agent.pairing.manager import PairingManager
 from agent.server.websocket_handler import RocketWebSocketServer, pick_available_port
 from agent.terminal.rocket_terminal import RocketTerminal
@@ -42,6 +43,13 @@ def terminal(
         print(f"[RocketTerminal] Port {port} is busy, using {resolved_port} instead.")
 
     terminal_ui = RocketTerminal()
+    did_bootstrap = rocket_bootstrap(rocket_config.data_dir, non_interactive=True, workspace_root=Path.cwd())
+    if did_bootstrap:
+        terminal_ui.log("Rocket Bootstrap complete.")
+
+    runtime_adapter = RocketAdapter(repo_root=Path.cwd(), data_dir=rocket_config.data_dir)
+    terminal_bridge = RuntimeTerminalBridge(terminal_ui, runtime_adapter)
+
     pairing = PairingManager(storage_dir=rocket_config.data_dir / "pairing", port=resolved_port)
     payload = pairing.load_or_create()
 
@@ -50,7 +58,7 @@ def terminal(
     )
     server = RocketWebSocketServer(
         adapter=adapter,
-        terminal=terminal_ui,
+        terminal=terminal_bridge,
         token=payload.token,
         host=host,
         port=resolved_port,

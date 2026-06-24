@@ -1,57 +1,31 @@
-# Phase 2 Stack Decision
+# Stack Decision
 
-## Final Stack
+## Implemented Runtime Stack
 
-| Layer | Primary | Fallback |
+| Layer | Selection | Status |
 |---|---|---|
-| Agent runtime | OpenWork + OpenCode | RocketAgent |
-| Memory | Fork_shokunin / Shokunin | RocketMemory SQLite + JSON + DPAPI |
-| Desktop automation | pywinauto | Python UIAutomation |
-| Browser automation | Playwright MCP | Native Playwright |
-| Skills | OpenCode native skills + Rocket skills | `rocket_skills/` only |
-| Verifier | Rocket verifier skill | Local verifier checks |
+| Agent runtime | OpenCode CLI only | Implemented |
+| Powers source | `C:\Users\Aarush\shokunin-opencode-powers` | Implemented |
+| Config source | `C:\Users\Aarush\.config\opencode` | Implemented |
+| Memory | Shokunin memory MCP plus Rocket SQLite/DPAPI memory | Implemented |
+| Desktop/browser automation | OpenCode MCP servers and installed skills | Configured |
+| Trust | Workspace mode by default, full access by explicit setup | Implemented groundwork |
+| Secrets | Rocket DPAPI vault, injected into OpenCode env | Implemented |
 
-## Decision Gate
+## Decision
 
-Use OpenWork if all are true:
+Rocket no longer uses OpenWork as an active runtime or fallback. Nemotron produces the intent, Rocket verifies the global OpenCode powers install, and OpenCode CLI executes the task.
 
-- Starts from terminal without UI.
-- Creates or reuses an OpenCode session.
-- Accepts a task prompt without user text entry.
-- Loads Rocket skills.
-- Loads selected MCP tools.
-- Exposes enough session state to verify progress.
+The global powers package provides the main MCP and skill catalog. Rocket preserves user-customized OpenCode config entries, adds missing required entries, and migrates real-looking env secrets out of `opencode.json`.
 
-Fallback to RocketAgent if any are false.
+## Configuration
 
-## Why This Stack
+- `ROCKET_PHASE2_ENABLED=0` disables execution.
+- `ROCKET_OPENCODE_COMMAND=opencode.cmd` selects the CLI executable.
+- `ROCKET_OPENCODE_MODEL=nvidia/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` selects the OpenCode model.
+- `C:\Users\Aarush\.config\opencode\opencode.json` is the global config Rocket verifies.
+- `data/rocket/phase2/RocketVault.json` stores protected secret values.
 
-- Smallest stack that covers most Windows desktop and browser automation.
-- Accessibility APIs first.
-- By name and by control, not pixels.
-- Python remains the desktop automation path.
-- OpenWork stays invisible.
-- Existing Rocket Phase 1 pipeline remains frozen.
+## Security Note
 
-## Explicit Non-Selections
-
-- Do not install FlaUI in MVP.
-- Do not install Windows MCP variants in MVP.
-- Do not install AutoIt MCP in MVP.
-- Do not install anti-bot browser projects.
-- Do not install broad skill catalogs blindly.
-- Do not build MCP Store UI.
-
-## RocketAgent Fallback
-
-If OpenWork is not viable:
-
-```text
-RocketAgent
-  planner: split task into 1-5 semantic steps
-  executor: pywinauto / native Playwright / shell-safe commands
-  verifier: read UIA tree or browser accessibility snapshot
-  memory: RocketMemory
-```
-
-RocketAgent must be deliberately tiny and must not become a second architecture.
+Any token previously committed or stored directly in `opencode.json` should be rotated. Rocket can remove/migrate plaintext values from future config reads, but it cannot make an already-exposed token safe again.

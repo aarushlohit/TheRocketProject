@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo   Rocket - Starting Terminal & Flutter App
+echo   Rocket - Starting Backend & Flutter App
 echo ========================================
 echo.
 
@@ -16,10 +16,10 @@ start "Rocket Flutter" cmd /k start_frontend.bat
 
 echo.
 echo ========================================
-echo Rocket Phase 1 is starting.
+echo Rocket is starting.
 echo ========================================
 echo.
-echo Terminal: ws://0.0.0.0:8765
+echo Backend: ws://0.0.0.0:8765
 echo Flutter: Check the Flutter window
 echo.
 echo Close this window if both servers started successfully.
