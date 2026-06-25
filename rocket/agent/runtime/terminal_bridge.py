@@ -6,6 +6,7 @@ from typing import Any
 
 from agent.runtime.adapter import RocketAdapter
 from agent.runtime.browser_state import task_display_text
+from agent.runtime.phone_speech import to_phone_speech
 
 
 class RuntimeTerminalBridge:
@@ -35,6 +36,7 @@ class RuntimeTerminalBridge:
                 "success": False,
                 "executor": "rocket-runtime",
                 "message": message,
+                "speech": to_phone_speech(message, success=False),
                 "verification": "Runtime exception before verification.",
                 "details": [],
             }
@@ -50,6 +52,7 @@ class RuntimeTerminalBridge:
             "success": result.success,
             "executor": result.executor,
             "message": result.message,
+            "speech": to_phone_speech(result.message, success=result.success),
             "verification": verification,
             "details": result.details,
         }
