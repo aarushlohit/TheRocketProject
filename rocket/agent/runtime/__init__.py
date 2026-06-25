@@ -2,6 +2,32 @@
 
 from agent.runtime.adapter import RocketAdapter
 from agent.runtime.bootstrap import rocket_bootstrap, sync_opencode_runtime
+from agent.runtime.first_launch import (
+    BootstrapMarkers,
+    BootstrapResult,
+    BundledComponents,
+    FirstLaunchBootstrap,
+    OnboardingPreferences,
+    detect_bundled_components,
+    registration_status,
+)
+from agent.runtime.install_mission import (
+    InstallMissionRunner,
+    InstallMissionVerifier,
+    InstallStatus,
+    UacProbe,
+    WindowsUacProbe,
+    install_key_from_mission,
+)
+from agent.runtime.browser_runtime import (
+    BrowserController,
+    BrowserRuntime,
+    BrowserRuntimeState,
+    BrowserWindow,
+    WindowsBrowserController,
+    get_browser_runtime,
+    reset_browser_runtime,
+)
 from agent.runtime.terminal_bridge import Phase2TerminalBridge, RuntimeTerminalBridge
 from agent.runtime.verifier import (
     BluetoothVerifier,
@@ -24,6 +50,26 @@ __all__ = [
     "RuntimeTerminalBridge",
     "rocket_bootstrap",
     "sync_opencode_runtime",
+    "BootstrapMarkers",
+    "BootstrapResult",
+    "BundledComponents",
+    "FirstLaunchBootstrap",
+    "OnboardingPreferences",
+    "detect_bundled_components",
+    "registration_status",
+    "InstallMissionRunner",
+    "InstallMissionVerifier",
+    "InstallStatus",
+    "UacProbe",
+    "WindowsUacProbe",
+    "install_key_from_mission",
+    "BrowserController",
+    "BrowserRuntime",
+    "BrowserRuntimeState",
+    "BrowserWindow",
+    "WindowsBrowserController",
+    "get_browser_runtime",
+    "reset_browser_runtime",
     "BluetoothVerifier",
     "BrowserVerifier",
     "FilesystemVerifier",
