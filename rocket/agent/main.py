@@ -13,6 +13,7 @@ import typer
 from agent.adapters.nemotron import NemotronAdapter
 from agent.adapters.pollinations import PollinationsAdapter
 from agent.runtime import RocketAdapter, RuntimeTerminalBridge, rocket_bootstrap
+from agent.runtime.first_launch import FirstLaunchBootstrap
 from agent.pairing.manager import PairingManager, PairingPayload
 from agent.server.websocket_handler import RocketWebSocketServer, pick_available_port
 from agent.server.dashboard_http import DashboardState, serve_dashboard
@@ -52,6 +53,12 @@ def terminal(
     did_bootstrap = rocket_bootstrap(rocket_config.data_dir, non_interactive=True, workspace_root=Path.cwd())
     if did_bootstrap:
         terminal_ui.log("Rocket Bootstrap complete.")
+
+    first_launch = FirstLaunchBootstrap(rocket_config.data_dir, workspace_root=Path.cwd())
+    launch_result = first_launch.run()
+    if launch_result.ran:
+        loaded = [name for name, ok in launch_result.registrations.items() if ok]
+        terminal_ui.log(f"First-launch bootstrap complete. Registered: {', '.join(loaded) or 'none'}.")
 
     runtime_adapter = RocketAdapter(repo_root=Path.cwd(), data_dir=rocket_config.data_dir)
     terminal_bridge = RuntimeTerminalBridge(terminal_ui, runtime_adapter)
