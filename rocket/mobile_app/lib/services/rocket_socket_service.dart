@@ -9,7 +9,7 @@ import '../models/user_profile.dart';
 import 'haptic_service.dart';
 import 'tts_service.dart';
 
-enum NovaConnectionStatus {
+enum RocketConnectionStatus {
   disconnected,
   connecting,
   connected,
@@ -31,7 +31,7 @@ class RocketTask {
   factory RocketTask.fromJson(Map<String, dynamic> json) {
     return RocketTask(
       source: json['source']?.toString() ?? 'unknown',
-      task: json['task']?.toString() ?? '',
+      task: json['display_task']?.toString() ?? json['task']?.toString() ?? '',
       latencyMs: (json['latency_ms'] as num?)?.toInt() ?? 0,
     );
   }
@@ -54,7 +54,7 @@ class RocketExecutionResult {
 
   factory RocketExecutionResult.fromJson(Map<String, dynamic> json) {
     return RocketExecutionResult(
-      task: json['task']?.toString() ?? '',
+      task: json['display_task']?.toString() ?? json['task']?.toString() ?? '',
       success: json['success'] == true,
       executor: json['executor']?.toString() ?? 'rocket-runtime',
       message: json['message']?.toString() ?? '',
@@ -69,8 +69,31 @@ class RocketExecutionResult {
   }
 }
 
-class NovaSocketService extends ChangeNotifier {
-  NovaSocketService({
+class RocketReaderUpdate {
+  const RocketReaderUpdate({
+    required this.task,
+    required this.message,
+    required this.phase,
+    required this.stepIndex,
+  });
+
+  final String task;
+  final String message;
+  final String phase;
+  final int stepIndex;
+
+  factory RocketReaderUpdate.fromJson(Map<String, dynamic> json) {
+    return RocketReaderUpdate(
+      task: json['display_task']?.toString() ?? json['task']?.toString() ?? '',
+      message: json['message']?.toString() ?? '',
+      phase: json['phase']?.toString() ?? 'working',
+      stepIndex: (json['step_index'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class RocketSocketService extends ChangeNotifier {
+  RocketSocketService({
     TtsService? ttsService,
     HapticService? hapticService,
   })  : _tts = ttsService ?? TtsService(),
@@ -83,9 +106,10 @@ class NovaSocketService extends ChangeNotifier {
   WebSocket? _socket;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
-  NovaConnectionStatus _status = NovaConnectionStatus.disconnected;
+  RocketConnectionStatus _status = RocketConnectionStatus.disconnected;
   bool _shouldReconnect = false;
   RocketTask? _lastTask;
+  RocketReaderUpdate? _lastReaderUpdate;
   RocketExecutionResult? _lastExecutionResult;
   String? _lastTryAgainMessage;
   Map<String, dynamic>? _lastResponse;
@@ -94,19 +118,20 @@ class NovaSocketService extends ChangeNotifier {
 
   PairingConfig? get config => _config;
   RocketTask? get lastTask => _lastTask;
+  RocketReaderUpdate? get lastReaderUpdate => _lastReaderUpdate;
   RocketExecutionResult? get lastExecutionResult => _lastExecutionResult;
   String? get lastTryAgainMessage => _lastTryAgainMessage;
   Map<String, dynamic>? get lastResponse => _lastResponse;
-  NovaConnectionStatus get status => _status;
+  RocketConnectionStatus get status => _status;
   TtsService get tts => _tts;
   HapticService get haptic => _haptic;
 
   String get statusLabel => switch (_status) {
-        NovaConnectionStatus.disconnected => 'Disconnected',
-        NovaConnectionStatus.connecting => 'Connecting',
-        NovaConnectionStatus.connected => 'Connected',
-        NovaConnectionStatus.reconnecting => 'Reconnecting',
-        NovaConnectionStatus.error => 'Connection error',
+        RocketConnectionStatus.disconnected => 'Disconnected',
+        RocketConnectionStatus.connecting => 'Connecting',
+        RocketConnectionStatus.connected => 'Connected',
+        RocketConnectionStatus.reconnecting => 'Reconnecting',
+        RocketConnectionStatus.error => 'Connection error',
       };
 
   void setLocalOnboardingState({
@@ -123,13 +148,14 @@ class NovaSocketService extends ChangeNotifier {
     _config = config;
     _lastResponse = null;
     _lastTask = null;
+    _lastReaderUpdate = null;
     _lastExecutionResult = null;
     _lastTryAgainMessage = null;
     if (_config != null) {
       _shouldReconnect = true;
       unawaited(connect());
     } else {
-      _updateStatus(NovaConnectionStatus.disconnected);
+      _updateStatus(RocketConnectionStatus.disconnected);
     }
   }
 
@@ -138,8 +164,8 @@ class NovaSocketService extends ChangeNotifier {
     _shouldReconnect = true;
     _reconnectTimer?.cancel();
     _updateStatus(_lastResponse == null
-        ? NovaConnectionStatus.connecting
-        : NovaConnectionStatus.reconnecting);
+        ? RocketConnectionStatus.connecting
+        : RocketConnectionStatus.reconnecting);
 
     try {
       debugPrint('[RocketSocket] Connecting to ${_config!.websocketUrl}');
@@ -155,7 +181,7 @@ class NovaSocketService extends ChangeNotifier {
     } catch (error) {
       debugPrint('[RocketSocket] Connect failed: $error');
       _lastResponse = {'type': 'error', 'message': 'Connection failed: $error'};
-      _updateStatus(NovaConnectionStatus.error);
+      _updateStatus(RocketConnectionStatus.error);
       await _tts.speakError('Connection failed');
       await _haptic.error();
       _scheduleReconnect();
@@ -170,15 +196,22 @@ class NovaSocketService extends ChangeNotifier {
     if (activeSocket != null) {
       await activeSocket.close();
     }
-    _updateStatus(NovaConnectionStatus.disconnected);
+    _updateStatus(RocketConnectionStatus.disconnected);
   }
 
-  Future<void> sendAudio(Uint8List audioBytes) async {
+  Future<void> sendAudio(
+    Uint8List audioBytes, {
+    String format = 'wav',
+    String mimeType = 'audio/wav',
+  }) async {
     await _ensureConnected();
     await _tts.speakFeedback('Processing voice');
     _sendJson({
       'type': 'audio',
+      'format': format,
+      'mime_type': mimeType,
       'data': base64Encode(audioBytes),
+      'bytes': audioBytes.length,
     });
     await _haptic.executionStart();
   }
@@ -186,7 +219,12 @@ class NovaSocketService extends ChangeNotifier {
   Future<void> sendDrawing(Uint8List imageBytes) async {
     await _ensureConnected();
     await _tts.speakFeedback('Drawing sent. Image processing.');
-    _socket!.add(imageBytes);
+    _sendJson({
+      'type': 'drawing',
+      'mime_type': 'image/png',
+      'data': base64Encode(imageBytes),
+      'bytes': imageBytes.length,
+    });
     await _haptic.executionStart();
   }
 
@@ -233,7 +271,7 @@ class NovaSocketService extends ChangeNotifier {
       final type = decoded['type']?.toString();
 
       if (type == 'connected') {
-        _updateStatus(NovaConnectionStatus.connected);
+        _updateStatus(RocketConnectionStatus.connected);
         _tts.speakFeedback(
             decoded['message']?.toString() ?? 'Connection established');
         _haptic.success();
@@ -262,6 +300,12 @@ class NovaSocketService extends ChangeNotifier {
         _tts.speakResult('Task generated. ${_lastTask!.task}');
         _haptic.success();
         announceTaskSent();
+      } else if (type == 'reader_update') {
+        _lastReaderUpdate = RocketReaderUpdate.fromJson(decoded);
+        final message = _lastReaderUpdate!.message.trim();
+        if (message.isNotEmpty) {
+          _tts.speakFeedback(message);
+        }
       } else if (type == 'execution_result') {
         _lastExecutionResult = RocketExecutionResult.fromJson(decoded);
         if (_lastExecutionResult!.success) {
@@ -283,7 +327,7 @@ class NovaSocketService extends ChangeNotifier {
           _shouldReconnect = false;
           _socket = null;
           _pingTimer?.cancel();
-          _updateStatus(NovaConnectionStatus.error);
+          _updateStatus(RocketConnectionStatus.error);
         }
         _tts.speakError(message);
         _haptic.error();
@@ -307,7 +351,7 @@ class NovaSocketService extends ChangeNotifier {
       _tts.speakFeedback('Connection lost. Reconnecting.');
       _scheduleReconnect();
     } else {
-      _updateStatus(NovaConnectionStatus.disconnected);
+      _updateStatus(RocketConnectionStatus.disconnected);
     }
   }
 
@@ -316,7 +360,7 @@ class NovaSocketService extends ChangeNotifier {
     _lastResponse = {'type': 'error', 'message': 'Socket error: $error'};
     _socket = null;
     _pingTimer?.cancel();
-    _updateStatus(NovaConnectionStatus.error);
+    _updateStatus(RocketConnectionStatus.error);
     _tts.speakError('Connection error');
     _haptic.error();
     if (_shouldReconnect) {
@@ -326,18 +370,18 @@ class NovaSocketService extends ChangeNotifier {
 
   void _scheduleReconnect() {
     if (_config == null) {
-      _updateStatus(NovaConnectionStatus.disconnected);
+      _updateStatus(RocketConnectionStatus.disconnected);
       return;
     }
     _reconnectTimer?.cancel();
-    _updateStatus(NovaConnectionStatus.reconnecting);
+    _updateStatus(RocketConnectionStatus.reconnecting);
     _reconnectTimer = Timer(
       const Duration(seconds: 3),
       () => unawaited(connect()),
     );
   }
 
-  void _updateStatus(NovaConnectionStatus nextStatus) {
+  void _updateStatus(RocketConnectionStatus nextStatus) {
     if (_status == nextStatus) return;
     _status = nextStatus;
     notifyListeners();

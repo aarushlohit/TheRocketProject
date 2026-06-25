@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_OPENCODE_CONFIG_DIR = Path.home() / ".config" / "opencode"
-DEFAULT_POWERS_SOURCE_DIR = Path(r"C:\Users\Aarush\shokunin-opencode-powers")
+DEFAULT_POWERS_SOURCE_DIR = Path(os.getenv("ROCKET_POWERS_SOURCE_DIR", r"C:\Users\Aarush\shokunin-opencode-powers"))
 DEFAULT_WORKSPACE_PATH = Path.home() / "Documents" / "OpenCodeWorkspace"
 
 

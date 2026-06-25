@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.runtime.adapter import RocketAdapter
+from agent.runtime.browser_state import task_display_text
 
 
 class RuntimeTerminalBridge:
@@ -21,14 +22,16 @@ class RuntimeTerminalBridge:
         self._terminal.received_task(client_id=client_id, source=source, task=task, latency_ms=latency_ms)
 
     def execute_task(self, client_id: str, task: str) -> dict[str, Any]:
-        self._terminal.log(f"{client_id}: Runtime executing: {task}")
+        display_task = task_display_text(task)
+        self._terminal.log(f"{client_id}: Runtime executing: {display_task}")
         try:
             result = self._adapter.execute(task)
         except Exception as error:
             message = f"Runtime failed: {error}"
             self._terminal.error(f"{client_id}: {message}")
             return {
-                "task": task,
+                "task": display_task,
+                "display_task": display_task,
                 "success": False,
                 "executor": "rocket-runtime",
                 "message": message,
@@ -42,7 +45,8 @@ class RuntimeTerminalBridge:
         else:
             self._terminal.error(f"{client_id}: Runtime stopped via {result.executor}: {result.message}")
         return {
-            "task": result.task,
+            "task": task_display_text(result.task),
+            "display_task": task_display_text(result.task),
             "success": result.success,
             "executor": result.executor,
             "message": result.message,

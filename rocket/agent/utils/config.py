@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,9 @@ class Config:
 
 def load_config(config_path: Path | None = None) -> Config:
     config = Config()
+    env_data_dir = os.getenv("ROCKET_DATA_DIR", "").strip()
+    if env_data_dir:
+        config.data_dir = Path(env_data_dir)
     path = config_path or Path.home() / ".rocket" / "config.yaml"
     if not path.exists():
         return config

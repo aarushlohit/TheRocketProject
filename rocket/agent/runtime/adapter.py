@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.runtime.memory import RocketMemory, RocketProfile
+from agent.runtime.browser_state import BrowserState, parse_mission, predict_browser_state
 from agent.runtime.opencode_cli_client import OpenCodeCliClient
 from agent.runtime.opencode_runtime import OpenCodeRuntimeManager, RuntimeReadinessReport
 from agent.runtime.results import RocketExecutionResult
@@ -31,6 +32,7 @@ class RocketAdapter:
             runtime_env=self.runtime.execution_env(),
             history=self._history(),
             session_id=str(self.memory.get("opencode_session_id", "") or ""),
+            browser_state=self._browser_state().to_dict(),
         )
         self._last_report: RuntimeReadinessReport | None = None
 
@@ -46,6 +48,7 @@ class RocketAdapter:
             runtime_env=self.runtime.execution_env(),
             history=self._history(),
             session_id=str(self.memory.get("opencode_session_id", "") or ""),
+            browser_state=self._browser_state().to_dict(),
         )
 
     def apply_profile(self, profile_data: dict[str, Any]) -> None:
@@ -93,6 +96,7 @@ class RocketAdapter:
         self.opencode.runtime_env = self.runtime.execution_env()
         self.opencode.history = self._history()
         self.opencode.session_id = str(self.memory.get("opencode_session_id", "") or "")
+        self.opencode.browser_state = self._browser_state()
         result = self.opencode.execute(task)
         self._remember_execution(result)
         return result
@@ -117,6 +121,9 @@ class RocketAdapter:
         history = self.memory.get("execution_history", [])
         return history if isinstance(history, list) else []
 
+    def _browser_state(self) -> BrowserState:
+        return BrowserState.from_dict(self.memory.get("browser_state"))
+
     def _remember_execution(self, result: RocketExecutionResult) -> None:
         history = self._history()
         event = {
@@ -128,11 +135,22 @@ class RocketAdapter:
         }
         history.append(event)
         self.memory.set("execution_history", history[-12:])
+        self._remember_browser_state(result)
         session_id = _session_id_from_details(result.details)
         if session_id:
             self.memory.set("opencode_session_id", session_id)
         if result.success:
             self.memory.set("last_successful_execution", event)
+
+    def _remember_browser_state(self, result: RocketExecutionResult) -> None:
+        mission = parse_mission(result.task)
+        current = self._browser_state()
+        if mission and isinstance(mission.get("predicted_browser_state"), dict):
+            next_state = BrowserState.from_dict(mission["predicted_browser_state"])
+        else:
+            next_state = predict_browser_state(current, result.task)
+        if result.success:
+            self.memory.set("browser_state", next_state.to_dict())
 
 
 def _session_id_from_details(details: list[str]) -> str:

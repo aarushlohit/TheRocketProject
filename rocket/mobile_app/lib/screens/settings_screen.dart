@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/app_theme.dart';
 import '../models/pairing_config.dart';
-import '../services/nova_socket_service.dart';
+import '../services/rocket_socket_service.dart';
 import 'qr_pairing_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -13,7 +13,7 @@ class SettingsScreen extends StatefulWidget {
     super.key,
   });
 
-  final NovaSocketService socketService;
+  final RocketSocketService socketService;
   final PairingConfig? currentPairing;
   final Future<void> Function(PairingConfig? config) onPairingChanged;
 

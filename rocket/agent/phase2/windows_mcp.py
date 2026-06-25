@@ -34,6 +34,8 @@ APP_ALIASES = {
     "explorer": ["explorer.exe"],
     "file explorer": ["explorer.exe"],
     "notepad": ["notepad.exe"],
+    "calculator": ["calc.exe", "Calculator"],
+    "calc": ["calc.exe", "Calculator"],
     "spotify": ["spotify:"],
 }
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/pairing_config.dart';
 import '../models/user_profile.dart';
-import '../services/nova_socket_service.dart';
+import '../services/rocket_socket_service.dart';
 import '../widgets/quadrant_tile.dart';
 import 'braille_screen.dart';
 import 'drawing_screen.dart';
@@ -24,7 +24,7 @@ class HomeScreen extends StatefulWidget {
     super.key,
   });
 
-  final NovaSocketService socketService;
+  final RocketSocketService socketService;
   final PairingConfig? pairingConfig;
   final UserProfile? userProfile;
   final Future<void> Function(PairingConfig? config) onPairingChanged;

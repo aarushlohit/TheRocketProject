@@ -33,33 +33,28 @@ class QuadrantTile extends StatelessWidget {
           color: backgroundColor,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.white, width: 1.5),
+              border: Border.all(color: Colors.white, width: 2.5),
             ),
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   if (symbol != null)
-                    Text(
-                      symbol!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 76,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    )
+                    const _BrailleDotsIcon()
                   else
                     Icon(
                       icon,
-                      size: 76,
+                      size: 92,
                       color: Colors.white,
                     ),
-                  const SizedBox(height: AppTheme.spacingM),
+                  const SizedBox(height: AppTheme.spacingL),
                   Text(
                     title.toUpperCase(),
                     style: AppTheme.headingMedium.copyWith(
                       color: Colors.white,
-                      fontSize: 28,
+                      fontSize: 34,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1,
                     ),
                   ),
                 ],
@@ -68,6 +63,56 @@ class QuadrantTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _BrailleDotsIcon extends StatelessWidget {
+  const _BrailleDotsIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 76,
+      height: 102,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _BrailleDotColumn(),
+          _BrailleDotColumn(),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrailleDotColumn extends StatelessWidget {
+  const _BrailleDotColumn();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        _BrailleDot(),
+        _BrailleDot(),
+        _BrailleDot(),
+      ],
+    );
+  }
+}
+
+class _BrailleDot extends StatelessWidget {
+  const _BrailleDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return const DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+      ),
+      child: SizedBox.square(dimension: 24),
     );
   }
 }

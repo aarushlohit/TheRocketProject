@@ -3,7 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../models/app_theme.dart';
 import '../models/pairing_config.dart';
-import '../services/nova_socket_service.dart';
+import '../services/rocket_socket_service.dart';
 
 class QrPairingScreen extends StatefulWidget {
   const QrPairingScreen({
@@ -11,7 +11,7 @@ class QrPairingScreen extends StatefulWidget {
     super.key,
   });
 
-  final NovaSocketService socketService;
+  final RocketSocketService socketService;
 
   @override
   State<QrPairingScreen> createState() => _QrPairingScreenState();

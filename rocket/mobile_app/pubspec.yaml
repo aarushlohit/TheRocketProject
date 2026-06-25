@@ -1,5 +1,5 @@
-name: nova_mobile
-description: Rocket Phase 1 mobile client for voice, drawing, and braille input.
+name: rocket
+description: Rocket mobile client for voice, drawing, and braille input.
 publish_to: "none"
 version: 0.1.0+1
 

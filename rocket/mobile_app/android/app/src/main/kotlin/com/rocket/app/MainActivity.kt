@@ -1,4 +1,4 @@
-package com.example.nova_mobile
+package com.rocket.app
 
 import io.flutter.embedding.android.FlutterActivity
 

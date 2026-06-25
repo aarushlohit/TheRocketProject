@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 import websockets
 
 from agent.adapters.nemotron import NemotronAdapter
+from agent.runtime.browser_state import task_display_text
 from agent.server.task_quality import assess_task_quality
 from agent.terminal.rocket_terminal import RocketTerminal
 
@@ -98,7 +99,19 @@ class RocketWebSocketServer:
                 return
             if message_type == "audio":
                 audio_bytes = _decode_base64(message.get("data"))
-                task = await self.adapter.process_audio(audio_bytes)
+                if len(audio_bytes) < 512:
+                    await _send(
+                        websocket,
+                        {
+                            "type": "try_again",
+                            "source": "voice",
+                            "message": "I could not hear enough audio. Please try again.",
+                            "latency_ms": int((time.perf_counter() - started) * 1000),
+                        },
+                    )
+                    return
+                audio_format = str(message.get("format") or message.get("mime_type") or "wav")
+                task = await self.adapter.process_audio(audio_bytes, audio_format=audio_format)
                 await self._send_task(websocket, client_id, "voice", task, started)
                 return
             if message_type == "braille":
@@ -108,7 +121,8 @@ class RocketWebSocketServer:
                 return
             if message_type == "drawing":
                 image_bytes = _decode_base64(message.get("data"))
-                task = await self.adapter.process_image(image_bytes)
+                mime_type = str(message.get("mime_type", "image/png")).strip() or "image/png"
+                task = await self.adapter.process_image(image_bytes, mime_type=mime_type)
                 await self._send_task(websocket, client_id, "drawing", task, started)
                 return
 
@@ -140,26 +154,67 @@ class RocketWebSocketServer:
             )
             return
 
-        self.terminal.received_task(client_id=client_id, source=source, task=task, latency_ms=latency_ms)
+        display_task = task_display_text(task)
+        self.terminal.received_task(client_id=client_id, source=source, task=display_task, latency_ms=latency_ms)
         await _send(
             websocket,
             {
                 "type": "task",
                 "source": source,
-                "task": task,
+                "task": display_task,
+                "display_task": display_task,
                 "latency_ms": latency_ms,
                 "message": "Task generated",
             },
         )
+        await self._send_reader_update(
+            websocket,
+            client_id=client_id,
+            task=display_task,
+            message=f"I understood: {display_task}. Starting now.",
+            phase="starting",
+            step_index=0,
+        )
         execute_task = getattr(self.terminal, "execute_task", None)
         if not callable(execute_task):
             return
+        await self._send_reader_update(
+            websocket,
+            client_id=client_id,
+            task=display_task,
+            message="Rocket is controlling the desktop. I will verify before reporting success.",
+            phase="working",
+            step_index=1,
+        )
         result = await asyncio.to_thread(execute_task, client_id, task)
         await _send(
             websocket,
             {
                 "type": "execution_result",
                 **result,
+            },
+        )
+
+    async def _send_reader_update(
+        self,
+        websocket: Any,
+        *,
+        client_id: str,
+        task: str,
+        message: str,
+        phase: str,
+        step_index: int,
+    ) -> None:
+        self.terminal.log(f"{client_id}: Reader update: {message}")
+        await _send(
+            websocket,
+            {
+                "type": "reader_update",
+                "task": task,
+                "display_task": task,
+                "message": message,
+                "phase": phase,
+                "step_index": step_index,
             },
         )
 

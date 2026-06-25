@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/app_theme.dart';
-import '../services/nova_socket_service.dart';
+import '../services/rocket_socket_service.dart';
 
 class BrailleScreen extends StatefulWidget {
   const BrailleScreen({
@@ -11,7 +11,7 @@ class BrailleScreen extends StatefulWidget {
     super.key,
   });
 
-  final NovaSocketService socketService;
+  final RocketSocketService socketService;
 
   @override
   State<BrailleScreen> createState() => _BrailleScreenState();
@@ -26,14 +26,10 @@ class _BrailleScreenState extends State<BrailleScreen> {
   bool _twoFingerEraseHandled = false;
   int? _selectedCell;
   String? _lastSpokenTask;
-  RocketExecutionResult? _lastExecutionResult;
-  String? _lastTryAgainMessage;
 
   @override
   void initState() {
     super.initState();
-    _lastExecutionResult = widget.socketService.lastExecutionResult;
-    _lastTryAgainMessage = widget.socketService.lastTryAgainMessage;
     widget.socketService.addListener(_handleSocketUpdate);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.socketService.tts.speakOnce('Braille mode.');
@@ -48,25 +44,14 @@ class _BrailleScreenState extends State<BrailleScreen> {
 
   void _handleSocketUpdate() {
     final task = widget.socketService.lastTask;
-    if (task != null &&
-        task.source == 'braille' &&
-        task.task != _lastSpokenTask) {
-      _lastSpokenTask = task.task;
-      widget.socketService.tts.speakResult('Intent recognized. ${task.task}');
-      widget.socketService.tts.speakFeedback('Task sent');
+    if (task == null ||
+        task.source != 'braille' ||
+        task.task == _lastSpokenTask) {
+      return;
     }
-
-    final result = widget.socketService.lastExecutionResult;
-    if (result != null && result != _lastExecutionResult) {
-      _lastExecutionResult = result;
-      if (mounted) setState(() => _sending = false);
-    }
-
-    final tryAgain = widget.socketService.lastTryAgainMessage;
-    if (tryAgain != null && tryAgain != _lastTryAgainMessage) {
-      _lastTryAgainMessage = tryAgain;
-      if (mounted) setState(() => _sending = false);
-    }
+    _lastSpokenTask = task.task;
+    widget.socketService.tts.speakResult('Intent recognized. ${task.task}');
+    widget.socketService.tts.speakFeedback('Task sent');
   }
 
   String _dotName(int dot) {

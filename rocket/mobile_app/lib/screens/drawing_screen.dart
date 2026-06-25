@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/app_theme.dart';
-import '../services/nova_socket_service.dart';
+import '../services/rocket_socket_service.dart';
 
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
@@ -13,7 +13,7 @@ class DrawingScreen extends StatefulWidget {
     super.key,
   });
 
-  final NovaSocketService socketService;
+  final RocketSocketService socketService;
 
   @override
   State<DrawingScreen> createState() => _DrawingScreenState();
@@ -26,14 +26,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
   int _tapCount = 0;
   Timer? _tapTimer;
   String? _lastSpokenTask;
-  RocketExecutionResult? _lastExecutionResult;
-  String? _lastTryAgainMessage;
 
   @override
   void initState() {
     super.initState();
-    _lastExecutionResult = widget.socketService.lastExecutionResult;
-    _lastTryAgainMessage = widget.socketService.lastTryAgainMessage;
     widget.socketService.addListener(_handleSocketUpdate);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.socketService.tts.speakOnce(
@@ -52,26 +48,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _handleSocketUpdate() {
     final task = widget.socketService.lastTask;
-    if (task != null &&
-        task.source == 'drawing' &&
-        task.task != _lastSpokenTask) {
-      _lastSpokenTask = task.task;
-      widget.socketService.tts.speakResult('Intent recognized. ${task.task}');
-      widget.socketService.tts.speakFeedback('Task sent');
-      widget.socketService.haptic.success();
+    if (task == null ||
+        task.source != 'drawing' ||
+        task.task == _lastSpokenTask) {
+      return;
     }
-
-    final result = widget.socketService.lastExecutionResult;
-    if (result != null && result != _lastExecutionResult) {
-      _lastExecutionResult = result;
-      if (mounted) setState(() => _sending = false);
-    }
-
-    final tryAgain = widget.socketService.lastTryAgainMessage;
-    if (tryAgain != null && tryAgain != _lastTryAgainMessage) {
-      _lastTryAgainMessage = tryAgain;
-      if (mounted) setState(() => _sending = false);
-    }
+    _lastSpokenTask = task.task;
+    widget.socketService.tts.speakResult('Intent recognized. ${task.task}');
+    widget.socketService.tts.speakFeedback('Task sent');
+    widget.socketService.haptic.success();
   }
 
   void _addPoint(Offset point) {

@@ -12,7 +12,31 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from agent.adapters.pollinations import PollinationsAdapter, _clean_task
-from agent.adapters.prompts import ROCKET_PARSER_SYSTEM_PROMPT, parser_user_prompt
+from agent.adapters.prompts import (
+    ROCKET_MISSION_COMPILER_SYSTEM_PROMPT,
+    ROCKET_PARSER_SYSTEM_PROMPT,
+    mission_compiler_user_prompt,
+    parser_user_prompt,
+)
+from agent.runtime.browser_state import (
+    BrowserState,
+    compile_browser_mission,
+    context_is_compatible_task,
+    mission_to_task,
+    parse_mission,
+    predict_browser_state,
+    strip_incompatible_context,
+)
+
+TRY_AGAIN_MISSION = {
+    "intent": "BROWSER_ACTION",
+    "context": "unknown",
+    "mission": "try_again",
+    "complexity": "LOW",
+    "estimated_steps": 1,
+    "success_criteria": ["input_unclear"],
+    "instructions": ["Ask the user to repeat or redraw the command"],
+}
 
 
 class NemotronAdapter:
@@ -31,6 +55,7 @@ class NemotronAdapter:
         )
         self.status: dict[str, str] = {
             "Nemotron": "unchecked",
+            "MissionCompiler": "unchecked",
             "Pollinations": "configured" if fallback else "disabled",
         }
         self._last_task = ""
@@ -38,6 +63,7 @@ class NemotronAdapter:
         self._profile_context = ""
         self._runtime_context = ""
         self._history: deque[str] = deque(maxlen=8)
+        self._browser_state = BrowserState()
 
     async def health_check(self) -> None:
         self.status["Nemotron"] = "configured" if os.getenv("NVIDIA_API_KEY") else "missing NVIDIA_API_KEY"
@@ -98,11 +124,12 @@ class NemotronAdapter:
         ]
         return await self._complete("image", content)
 
-    async def process_audio(self, audio_bytes: bytes) -> str:
+    async def process_audio(self, audio_bytes: bytes, audio_format: str = "wav") -> str:
         encoded_audio = base64.b64encode(audio_bytes).decode("ascii")
+        normalized_format = _audio_format(audio_format)
         content: list[dict[str, Any]] = [
             {"type": "text", "text": parser_user_prompt("audio", context=self._context_text())},
-            {"type": "input_audio", "input_audio": {"data": encoded_audio, "format": "wav"}},
+            {"type": "input_audio", "input_audio": {"data": encoded_audio, "format": normalized_format}},
         ]
         return await self._complete("audio", content)
 
@@ -112,15 +139,17 @@ class NemotronAdapter:
 
     async def _complete(self, input_type: str, user_content: Any) -> str:
         try:
+            max_tokens = 384 if input_type in {"audio", "image"} else 256
+            cautious_input = input_type in {"audio", "image"}
             completion = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": ROCKET_PARSER_SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
-                temperature=0.1,
-                top_p=0.95,
-                max_tokens=256,
+                temperature=0.0 if cautious_input else 0.1,
+                top_p=0.9 if cautious_input else 0.95,
+                max_tokens=max_tokens,
                 extra_body={
                     "chat_template_kwargs": {"enable_thinking": False},
                     "reasoning_budget": 0,
@@ -128,25 +157,56 @@ class NemotronAdapter:
                 stream=False,
             )
             content = completion.choices[0].message.content or ""
-            task = self._contextualize_task(_clean_task(content))
+            normalized_command = _clean_task(content)
+            task = await self._compile_with_mission_model(normalized_command)
             if not task:
                 raise RuntimeError("Nemotron returned an empty task.")
             self.status["Nemotron"] = "ok"
-            self._remember_task(task)
+            if _should_remember_task(task):
+                self._remember_task(task)
             return task
         except Exception as error:
             self.status["Nemotron"] = f"error: {error}"
             if self.fallback is None:
                 raise
             fallback_text = _fallback_text(input_type, user_content)
-            task = self._contextualize_task(self.fallback.process_text(input_type, fallback_text))
-            self._remember_task(task)
+            task = self._compile_task(self.fallback.process_text(input_type, fallback_text))
+            if _should_remember_task(task):
+                self._remember_task(task)
             return task
+
+    async def _compile_with_mission_model(self, normalized_command: str) -> str:
+        if _looks_like_parser_garbage(normalized_command):
+            return mission_to_task(TRY_AGAIN_MISSION)
+        if normalized_command.strip().lower() in {"try_again", "try again"}:
+            return mission_to_task(TRY_AGAIN_MISSION)
+        try:
+            completion = await self.client.chat.completions.create(
+                model=os.getenv("ROCKET_MISSION_COMPILER_MODEL", "minimaxai/minimax-m3"),
+                messages=[
+                    {"role": "system", "content": ROCKET_MISSION_COMPILER_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": mission_compiler_user_prompt(normalized_command, context=self._context_text()),
+                    },
+                ],
+                temperature=0.0,
+                top_p=0.9,
+                max_tokens=384,
+                stream=False,
+            )
+            compiled = _clean_task(completion.choices[0].message.content or "")
+            self.status["MissionCompiler"] = "ok"
+            return self._compile_task(compiled)
+        except Exception as error:
+            self.status["MissionCompiler"] = f"fallback: {error}"
+            return self._compile_task(normalized_command)
 
     def _context_text(self) -> str:
         parts: list[str] = []
         if self._active_app:
             parts.append(f"Active app: {self._active_app}")
+        parts.append(f"BrowserState: {json.dumps(self._browser_state.to_dict(), ensure_ascii=True)}")
         if self._last_task:
             parts.append(f"Last task: {self._last_task}")
         if self._history:
@@ -157,11 +217,28 @@ class NemotronAdapter:
             parts.append(f"Runtime setup: {self._runtime_context}")
         return "\n".join(parts)
 
+    def _compile_task(self, raw_output: str) -> str:
+        if _looks_like_parser_garbage(raw_output):
+            return mission_to_task(TRY_AGAIN_MISSION)
+        mission = parse_mission(raw_output)
+        if mission is None:
+            contextual = self._contextualize_task(raw_output)
+            mission = compile_browser_mission(contextual, self._browser_state)
+        else:
+            normalized_source = _mission_source_text(mission, raw_output)
+            fallback = compile_browser_mission(normalized_source, self._browser_state)
+            mission = {**mission, **fallback}
+        return mission_to_task(mission)
+
     def _contextualize_task(self, task: str) -> str:
         if not task:
             return task
         normalized = task.strip()
         lower = normalized.lower()
+        if self._browser_state.current_site and _looks_like_generic_search(lower):
+            query = re.sub(r"^(search|find|look up)\s+", "", normalized, flags=re.IGNORECASE).strip(" .")
+            if query:
+                return f"Search {query} on {_site_label(self._browser_state.current_site)}."
         if self._active_app and _looks_like_generic_search(lower) and self._active_app.lower() not in lower:
             query = re.sub(r"^(search|find|look up)\s+", "", normalized, flags=re.IGNORECASE).strip(" .")
             if query:
@@ -175,7 +252,14 @@ class NemotronAdapter:
     def _remember_task(self, task: str) -> None:
         self._last_task = task
         self._history.append(task)
-        app = _extract_active_app(task)
+        mission = parse_mission(task)
+        mission_text = str(mission.get("mission", "")) if mission else task
+        self._browser_state = BrowserState.from_dict(
+            mission.get("predicted_browser_state") if mission else predict_browser_state(self._browser_state, task).to_dict()
+        )
+        app = _extract_active_app(mission_text)
+        if not app and self._browser_state.current_site:
+            app = _site_label(self._browser_state.current_site)
         if app:
             self._active_app = app
 
@@ -185,9 +269,30 @@ def _data_url(mime_type: str, payload: bytes) -> str:
     return f"data:{mime_type};base64,{encoded}"
 
 
+def _audio_format(value: str) -> str:
+    cleaned = value.strip().lower().lstrip(".")
+    if cleaned in {"wav", "mp3", "flac", "ogg"}:
+        return cleaned
+    if cleaned in {"audio/wav", "audio/x-wav"}:
+        return "wav"
+    if cleaned == "audio/mpeg":
+        return "mp3"
+    return "wav"
+
+
 def _fallback_text(input_type: str, user_content: Any) -> str:
     if isinstance(user_content, str):
         return user_content
+    if input_type == "audio":
+        return (
+            "Audio input was received but primary multimodal transcription failed. "
+            "Do not guess from silence. If no reliable spoken command is available, return try_again."
+        )
+    if input_type == "image":
+        return (
+            "Drawing input was received but primary visual parsing failed. "
+            "Do not guess from random marks. If no reliable drawn or handwritten command is visible, return try_again."
+        )
     return f"{input_type} input was received but primary multimodal parsing failed. Generate a concise executable task from the available input context."
 
 
@@ -230,3 +335,56 @@ def _navigation_site(task: str) -> str:
         if re.search(pattern, task):
             return url
     return ""
+
+
+def _site_label(site: str) -> str:
+    labels = {
+        "youtube.com": "YouTube",
+        "spotify.com": "Spotify",
+        "gmail.com": "Gmail",
+        "github.com": "GitHub",
+        "google.com": "Google",
+        "reddit.com": "Reddit",
+    }
+    return labels.get(site, site)
+
+
+def _mission_source_text(mission: dict[str, Any], raw_output: str) -> str:
+    intent = str(mission.get("intent", "")).upper()
+    mission_text = str(mission.get("mission", "")).strip()
+    context = str(mission.get("context", "")).strip()
+    if context and not context_is_compatible_task(mission_text, context, intent):
+        return strip_incompatible_context(mission_text, context)
+    if intent == "SEARCH" and mission_text:
+        return mission_text
+    if mission_text:
+        return f"{mission_text} {context}".strip()
+    return raw_output
+
+
+def _should_remember_task(task: str) -> bool:
+    mission = parse_mission(task)
+    if mission is None:
+        return not _looks_like_parser_garbage(task)
+    text = " ".join(
+        [
+            str(mission.get("intent", "")),
+            str(mission.get("context", "")),
+            str(mission.get("mission", "")),
+            " ".join(str(item) for item in mission.get("success_criteria", [])),
+        ]
+    ).lower()
+    return "try_again" not in text and "input_unclear" not in text and not _looks_like_parser_garbage(text)
+
+
+def _looks_like_parser_garbage(value: str) -> bool:
+    lower = value.lower()
+    if "opencoding" in lower:
+        return True
+    tokens = re.findall(r"[A-Za-z0-9.]+", value)
+    if len(tokens) >= 12:
+        numeric = sum(1 for token in tokens if re.fullmatch(r"\d+(\.\d+)?", token))
+        if numeric / len(tokens) > 0.55:
+            return True
+    repeated_numbers = re.findall(r"(?:^|[,\s])1(?:\.5)?(?=[,\s]|$)", value)
+    return len(repeated_numbers) >= 10

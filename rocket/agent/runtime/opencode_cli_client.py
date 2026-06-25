@@ -15,12 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from agent.runtime.memory import RocketProfile
-from agent.runtime.prompts import ROCKET_SYSTEM_PROMPT
+from agent.runtime.browser_state import BrowserState, parse_mission, task_display_text
 from agent.runtime.results import RocketExecutionResult
 from agent.runtime.setup import RocketSetup
 
 
 DEFAULT_OPENCODE_MODELS = (
+    "opencode/mimo-v2.5-free",
     "opencode/deepseek-v4-flash-free",
     "opencode/nemotron-3-ultra-free",
     "opencode/north-mini-code-free",
@@ -42,6 +43,7 @@ class OpenCodeCliClient:
         runtime_env: dict[str, str] | None = None,
         history: list[dict[str, Any]] | None = None,
         session_id: str = "",
+        browser_state: dict[str, Any] | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.profile = profile
@@ -49,13 +51,19 @@ class OpenCodeCliClient:
         self.runtime_env = runtime_env or {}
         self.history = history or []
         self.session_id = session_id
+        self.browser_state = BrowserState.from_dict(browser_state)
         self.command = os.getenv("ROCKET_OPENCODE_COMMAND", "opencode.cmd")
+        self.agent = os.getenv("ROCKET_OPENCODE_AGENT", "rocket-blind")
         self.models = _configured_models()
         self.model = self.models[0]
         self.timeout_seconds = _configured_timeout()
+        self.output_format = os.getenv("ROCKET_OPENCODE_FORMAT", "default").strip().lower() or "default"
         self.print_logs = os.getenv("ROCKET_OPENCODE_PRINT_LOGS", "1").strip().lower() not in {"0", "false", "no"}
         self.persistent_server = (
-            os.getenv("ROCKET_OPENCODE_PERSISTENT_SERVER", "1").strip().lower() not in {"0", "false", "no"}
+            os.getenv("ROCKET_OPENCODE_PERSISTENT_SERVER", "0").strip().lower() in {"1", "true", "yes", "on"}
+        )
+        self.reuse_session = (
+            os.getenv("ROCKET_OPENCODE_REUSE_SESSION", "0").strip().lower() in {"1", "true", "yes", "on"}
         )
 
     def available(self) -> bool:
@@ -104,14 +112,15 @@ class OpenCodeCliClient:
             "--model",
             model,
             "--agent",
-            "build",
-            "--format",
-            "json",
+            self.agent,
         ]
+        if self.output_format in {"json", "default"}:
+            command.extend(["--format", self.output_format])
         server_url = self._server_url()
+        server_log_offsets = _server_log_offsets(self._execution_dir()) if server_url else {}
         if server_url:
             command.extend(["--attach", server_url])
-        if self.session_id:
+        if self.reuse_session and self.session_id:
             command.extend(["--session", self.session_id])
         if self.print_logs:
             command.extend(["--print-logs", "--log-level", os.getenv("ROCKET_OPENCODE_LOG_LEVEL", "INFO")])
@@ -146,17 +155,26 @@ class OpenCodeCliClient:
 
         stdout_text = completed.stdout or ""
         stderr_text = completed.stderr or ""
+        server_log_delta = _server_log_delta(self._execution_dir(), server_log_offsets) if server_url else ""
         session_id = _extract_session_id(stdout_text, stderr_text) or self.session_id
-        message = _extract_message(stdout_text) or _tail(stdout_text)
+        message = _extract_message(stdout_text)
+        if not message and not _has_json_events(stdout_text):
+            message = _tail(stdout_text)
         stderr_tail = _tail(stderr_text)
         if completed.returncode != 0:
             message = stderr_tail or message
+        server_error = _server_runtime_error_message(server_log_delta)
+        if server_error:
+            completed_returncode = completed.returncode if completed.returncode != 0 else 1
+            completed = CompletedShim(completed_returncode)
+            message = server_error
         if not message and completed.returncode == 0:
             message = "Task completed."
         success = completed.returncode == 0 and not _looks_like_failure(message)
         details = [
             f"returncode={completed.returncode}",
             f"model={model}",
+            f"agent={self.agent}",
             f"dir={self._execution_dir()}",
         ]
         if server_url:
@@ -165,11 +183,16 @@ class OpenCodeCliClient:
             details.append(f"session_id={session_id}")
         if stderr_tail:
             details.append(f"stderr={stderr_tail}")
+        if server_error:
+            details.append(f"server_error={server_error}")
         if desktop_expectation and success:
             verified, verification_message = _verify_desktop_expectation(desktop_expectation)
             details.append(f"desktop_verification={verification_message}")
             if verified:
                 message = verification_message
+                cleanup_message = _cleanup_after_success(task, desktop_expectation)
+                if cleanup_message:
+                    details.append(f"cleanup={cleanup_message}")
             else:
                 success = False
                 message = (
@@ -186,55 +209,46 @@ class OpenCodeCliClient:
         )
 
     def _build_prompt(self, task: str) -> str:
+        mission = parse_mission(task)
+        display_task = task_display_text(task)
+        mission_text = str(mission.get("mission", display_task)) if mission else display_task
+        intent = str(mission.get("intent", "TASK")) if mission else "TASK"
+        context = str(mission.get("context", "desktop")) if mission else "desktop"
+        criteria = mission.get("success_criteria", []) if mission else []
+        instructions = mission.get("instructions", []) if mission else []
+        goal = _goal_text(display_task, criteria)
         profile = json.dumps(asdict(self.profile), ensure_ascii=True)
         setup = json.dumps(self.setup.to_dict(), ensure_ascii=True)
-        history = json.dumps(self.history[-8:], ensure_ascii=True)
+        history = _compact_history(self.history[-8:])
+        browser_state = _compact_browser_context(self.browser_state)
         visible_windows = json.dumps(_visible_window_titles(), ensure_ascii=True)
         credential_names = sorted(self.setup.credential_refs.keys())
         credential_context = ", ".join(credential_names) if credential_names else "none"
         return (
-            f"Execute this desktop task now: {task}\n\n"
-            "You are running inside Rocket's persistent OpenCode session. Use the same session context and "
-            "the current visible desktop state. Do not reset assumptions between tasks.\n\n"
-            "Accuracy workflow, in order:\n"
-            "1. Read the task and attached prompt once. Do not spend time explaining or doing unnecessary reasoning.\n"
-            "2. Observe: inspect Recent execution history, Visible windows, and current task before acting.\n"
-            "3. Select tools fast: use all relevant configured MCP servers and skills. Prefer Playwright MCP for "
-            "browser/web tasks, rocket-windows for native Windows apps, computer-use/screen tools for GUI vision, "
-            "shokunin-memory for durable recall, and superpowers skills only when they directly help execution.\n"
-            "4. Reuse: if the requested app/browser/window already exists in Visible windows, focus/reuse it. "
-            "Do not open another copy or another browser tab unless the user asks for a new one.\n"
-            "5. Act: perform the smallest action that completes the task.\n"
-            "6. Verify: cross-check completion with rocket_list_windows, screenshot/vision, browser URL/page "
-            "state, process/window state, or tool result.\n"
-            "7. Recover: if verification fails, make one focused correction and verify again.\n\n"
-            "Hard limits:\n"
-            "Use at most 8 desktop/browser tool calls for one Rocket task.\n"
-            "Do not call the same failed tool with the same arguments repeatedly.\n"
-            "If the task is not complete after one recovery attempt, stop and report verification failed.\n"
-            "Never keep acting after the final status.\n\n"
-            "Browser rules:\n"
-            "For browser automation, prefer Playwright MCP because it is faster and more reliable than visual clicking.\n"
-            "For YouTube open/search/play tasks, use Playwright MCP: navigate directly to the target YouTube URL, "
-            "search URL, or first result, then verify the page/video state with browser URL/title/page content.\n"
-            "Use computer-use or screenshot vision only when Playwright cannot observe or control the needed state.\n"
-            "If a task follows an earlier browser task, continue in the existing browser window/tab.\n"
-            "If the task says Chrome, target Chrome exactly. Do not use Brave, Edge, or another browser unless "
-            "Chrome is not visible/running after observation.\n"
-            "When opening Chrome visibly, open/focus Chrome, maximize it to full screen or a maximized window, "
-            "then verify a Chrome window is visible before continuing.\n"
-            "For existing-browser navigation, focus the exact browser window, press Ctrl+L, type the target URL "
-            "or search text, press Enter, then verify the loaded page.\n"
-            "For YouTube search, use https://www.youtube.com/results?search_query=<query> directly.\n\n"
-            "Completion rule:\n"
-            "Only print final status after verification. If verification is weak or failed, say that clearly.\n\n"
-            f"System policy:\n{ROCKET_SYSTEM_PROMPT}\n\n"
-            f"Profile: {profile}\n"
-            f"Runtime setup: {setup}\n"
-            f"Available credential refs: {credential_context}\n"
+            "ROCKET TASK BRIEF\n"
+            f"Mission: {display_task}\n"
+            f"Goal: {goal}\n"
+            f"Intent: {intent}\n"
+            f"Context: {context}\n"
+            f"Executable mission: {mission_text}\n"
+            f"Success criteria: {_compact_list(criteria)}\n"
+            f"Mission instructions: {_compact_list(instructions)}\n\n"
+            "AVAILABLE POWERS\n"
+            "Use all configured OpenCode MCP servers, skills, plugins, superpowers, rocket-windows, Playwright/browser "
+            "tools, vision/computer-use tools, shokunin-memory, shell, and filesystem tools. Choose the tool that best "
+            "proves the user's goal in observable reality.\n\n"
+            "WINDOWS APP HINTS\n"
+            "For Calculator missions, open the installed Windows Calculator with Start-Process calc.exe or the Windows "
+            "app launcher, focus the visible Calculator window, enter the expression, and verify the displayed result. "
+            "Do not report success only because a command returned.\n\n"
+            "CURRENT CONTEXT\n"
+            f"Browser: {browser_state}\n"
             f"Recent execution history: {history}\n"
             f"Visible windows before action: {visible_windows}\n"
-            f"Current OpenCode session id: {self.session_id or 'new'}\n"
+            f"Available credential refs: {credential_context}\n"
+            f"Current OpenCode session id: {self.session_id or 'new'}\n\n"
+            f"Profile: {profile}\n"
+            f"Runtime setup: {setup}\n"
         )
 
     def _execution_dir(self) -> Path:
@@ -252,6 +266,9 @@ class OpenCodeCliClient:
 
 def _extract_message(stdout: str | None) -> str:
     stdout = stdout or ""
+    structured = _structured_speech(stdout)
+    if structured:
+        return structured
     best = ""
     for line in stdout.splitlines():
         line = _strip_ansi(line).strip()
@@ -268,8 +285,20 @@ def _extract_message(stdout: str | None) -> str:
     return best.strip()
 
 
+def _structured_speech(text: str) -> str:
+    speech = ""
+    content = ""
+    for raw_line in text.splitlines():
+        line = _strip_ansi(raw_line).strip()
+        if line.upper().startswith("SPEECH:"):
+            speech = line.split(":", 1)[1].strip()
+        elif line.upper().startswith("CONTENT:"):
+            content = line.split(":", 1)[1].strip()
+    return speech or content
+
+
 def _short_run_message(task: str) -> str:
-    compact = " ".join(task.strip().split())
+    compact = " ".join(task_display_text(task).strip().split())
     if len(compact) > 180:
         compact = compact[:177].rstrip() + "..."
     return (
@@ -329,6 +358,19 @@ def _text_from_json(item: Any) -> str:
         return item
     if not isinstance(item, dict):
         return ""
+    if item.get("synthetic") is True:
+        return ""
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("compaction_continue") is True:
+        return ""
+    item_type = str(item.get("type", "")).lower()
+    if item_type in {"step-start", "step-finish", "tool", "tool-call", "tool-result"}:
+        return ""
+    part = item.get("part")
+    if isinstance(part, dict):
+        part_text = _text_from_json(part)
+        if part_text:
+            return part_text
     for key in ("text", "message", "content", "summary"):
         value = item.get(key)
         if isinstance(value, str) and value.strip():
@@ -340,12 +382,69 @@ def _text_from_json(item: Any) -> str:
     return ""
 
 
+def _has_json_events(stdout: str | None) -> bool:
+    stdout = stdout or ""
+    for line in stdout.splitlines():
+        clean = _strip_ansi(line).strip()
+        if not clean:
+            continue
+        try:
+            item: Any = json.loads(clean)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict) and ("type" in item or "sessionID" in item or "part" in item):
+            return True
+    return False
+
+
 def _tail(text: str | None, limit: int = 1200) -> str:
     text = text or ""
     text = _strip_ansi(text).strip()
     if len(text) <= limit:
         return text
     return text[-limit:]
+
+
+def _goal_text(display_task: str, criteria: Any) -> str:
+    criteria_text = _compact_list(criteria)
+    if criteria_text == "none":
+        return f"Complete and verify: {display_task}"
+    return f"Complete and verify: {display_task}. Observable success: {criteria_text}."
+
+
+def _compact_list(values: Any) -> str:
+    if not isinstance(values, list):
+        return "none"
+    items = [str(item).strip() for item in values if str(item).strip()]
+    return ", ".join(items[:8]) if items else "none"
+
+
+def _compact_browser_context(state: BrowserState) -> str:
+    data = state.to_dict()
+    compact = {
+        "browser": data.get("current_browser", "chrome"),
+        "site": data.get("current_site", ""),
+        "tab": data.get("current_tab", 1),
+        "previous_tab": data.get("previous_tab"),
+        "search_query": data.get("search_query", ""),
+        "video_playing": data.get("video_playing", False),
+        "browser_open": data.get("browser_open", False),
+        "last_action": data.get("last_action", ""),
+    }
+    return json.dumps(compact, ensure_ascii=True)
+
+
+def _compact_history(history: list[dict[str, Any]]) -> str:
+    compact: list[str] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        task = task_display_text(str(item.get("task") or item.get("display_task") or "").strip())
+        message = str(item.get("message", "")).strip()
+        success = item.get("success")
+        if task:
+            compact.append(f"{task} => success={success}; {message[:120]}")
+    return json.dumps(compact[-8:], ensure_ascii=True)
 
 
 def _strip_ansi(text: str | None) -> str:
@@ -469,8 +568,56 @@ def _should_try_next_model(result: RocketExecutionResult) -> bool:
         "quota",
         "overloaded",
         "temporarily unavailable",
+        "certificate is not yet valid",
+        "certificate has expired",
+        "stream error",
+        "provider/runtime error",
     )
     return any(marker in text for marker in retry_markers)
+
+
+class CompletedShim:
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+
+
+def _server_log_offsets(execution_dir: Path) -> dict[Path, int]:
+    offsets: dict[Path, int] = {}
+    for path in (execution_dir / ".rocket" / "opencode_server.log", execution_dir / ".rocket" / "opencode_server.err"):
+        try:
+            offsets[path] = path.stat().st_size
+        except OSError:
+            offsets[path] = 0
+    return offsets
+
+
+def _server_log_delta(execution_dir: Path, offsets: dict[Path, int], limit: int = 12000) -> str:
+    chunks: list[str] = []
+    for path, offset in offsets.items():
+        try:
+            with path.open("rb") as handle:
+                handle.seek(offset)
+                data = handle.read(limit)
+        except OSError:
+            continue
+        if data:
+            chunks.append(data.decode("utf-8", errors="replace"))
+    return "\n".join(chunks)
+
+
+def _server_runtime_error_message(log_delta: str) -> str:
+    text = _strip_ansi(log_delta)
+    lower = text.lower()
+    if "certificate is not yet valid" in lower:
+        return "OpenCode provider/runtime error: certificate is not yet valid."
+    if "certificate has expired" in lower:
+        return "OpenCode provider/runtime error: certificate has expired."
+    if "stream error" in lower and "error.error=" in lower:
+        match = re.search(r'error\.error="([^"]+)"', text)
+        if match:
+            return f"OpenCode provider/runtime error: {match.group(1)}"
+        return "OpenCode provider/runtime stream error."
+    return ""
 
 
 def _is_verification_failure(result: RocketExecutionResult) -> bool:
@@ -492,6 +639,32 @@ def _correction_prompt(prompt: str, result: RocketExecutionResult) -> str:
 
 
 def _desktop_expectation(task: str) -> dict[str, str] | None:
+    mission = parse_mission(task)
+    if mission:
+        intent = str(mission.get("intent", "")).upper()
+        context = str(mission.get("context", ""))
+        task = f"{mission.get('mission', '')} {context}"
+        if intent in {"OPEN_APP", "SEND_MESSAGE", "CALCULATE"}:
+            expectation = {
+                "whatsapp": "whatsapp",
+                "settings": "systemsettings",
+                "chrome": "chrome",
+                "edge": "msedge",
+                "vscode": "code",
+                "explorer": "explorer",
+                "notepad": "notepad",
+                "calculator": "calculator",
+                "terminal": "windowsterminal",
+            }.get(context.lower())
+            if expectation:
+                item = {"kind": "app", "label": context.lower(), "process": expectation}
+                if context.lower() == "calculator":
+                    item["processes"] = "calculator,calculatorapp"
+                    item["title_keywords"] = "calculator"
+                    expected = _expected_calculator_result(task)
+                    if intent == "CALCULATE" and expected:
+                        item["expected_result"] = expected
+                return item
     lower = task.lower()
     app_patterns = (
         (r"\bopen\s+(google\s+chrome|chrome)\b", "chrome", "chrome"),
@@ -503,20 +676,213 @@ def _desktop_expectation(task: str) -> dict[str, str] | None:
     for pattern, label, process in app_patterns:
         if re.search(pattern, lower):
             return {"kind": "app", "label": label, "process": process}
+    if re.search(r"\b(open|launch|start|calculate|calc)\b.*\b(calculator|calc)\b|\b\d+\s*[+\-*/]\s*\d+\b", lower):
+        return {
+            "kind": "app",
+            "label": "calculator",
+            "process": "calculator",
+            "processes": "calculator,calculatorapp",
+            "title_keywords": "calculator",
+            "expected_result": _expected_calculator_result(task),
+        }
     if " in chrome" in lower or "chrome" in lower and "search" in lower:
         return {"kind": "app", "label": "chrome", "process": "chrome"}
     return None
 
 
+def _cleanup_after_success(task: str, expectation: dict[str, str]) -> str:
+    if not _should_cleanup_after_success(task, expectation):
+        return ""
+    return _close_expected_app(expectation)
+
+
+def _should_cleanup_after_success(task: str, expectation: dict[str, str]) -> bool:
+    label = str(expectation.get("label", "")).lower()
+    lower = task_display_text(task).lower()
+    mission = parse_mission(task)
+    intent = str(mission.get("intent", "")).upper() if mission else ""
+
+    if any(phrase in lower for phrase in ("keep open", "leave open", "do not close", "don't close", "stay open")):
+        return False
+    if any(phrase in lower for phrase in ("watch", "play video", "listen", "read", "open youtube", "open chrome")):
+        return False
+    if label in {"chrome", "edge", "youtube", "spotify", "whatsapp", "vscode", "code"}:
+        return False
+    if intent in {"CALCULATE"}:
+        return True
+    if label in {"calculator", "notepad"} and any(word in lower for word in ("calculate", "calc", "temporary", "quick")):
+        return True
+    return False
+
+
+def _close_expected_app(expectation: dict[str, str]) -> str:
+    label = str(expectation.get("label", "app")).lower()
+    processes = [
+        item.strip()
+        for item in str(expectation.get("processes") or expectation.get("process") or "").split(",")
+        if item.strip()
+    ]
+    title_keywords = [
+        item.strip()
+        for item in str(expectation.get("title_keywords", label)).split(",")
+        if item.strip()
+    ]
+    process_list = ",".join(processes)
+    title_list = ",".join(title_keywords)
+    script = rf"""
+$processes = '{process_list}'.Split(',') | Where-Object {{ $_ }}
+$titles = '{title_list}'.Split(',') | Where-Object {{ $_ }}
+$closed = @()
+foreach ($p in Get-Process) {{
+  $name = ($p.ProcessName ?? '').ToLowerInvariant()
+  $title = ($p.MainWindowTitle ?? '').ToLowerInvariant()
+  $matchProcess = $false
+  foreach ($candidate in $processes) {{
+    $candidate = $candidate.ToLowerInvariant()
+    if ($name -eq $candidate -or $name.StartsWith($candidate)) {{ $matchProcess = $true }}
+  }}
+  $matchTitle = $false
+  foreach ($candidate in $titles) {{
+    $candidate = $candidate.ToLowerInvariant()
+    if ($candidate -and $title.Contains($candidate)) {{ $matchTitle = $true }}
+  }}
+  if ($name -eq 'applicationframehost' -and -not $matchTitle) {{ continue }}
+  if ($matchProcess -or $matchTitle) {{
+    try {{
+      if ($p.MainWindowHandle -ne 0) {{ [void]$p.CloseMainWindow(); Start-Sleep -Milliseconds 350 }}
+      if (-not $p.HasExited -and $name -ne 'applicationframehost') {{ $p.Kill() }}
+      $closed += $p.ProcessName
+    }} catch {{}}
+  }}
+}}
+if ($closed.Count -eq 0) {{ 'no matching {label} window to close' }} else {{ 'closed ' + (($closed | Select-Object -Unique) -join ', ') }}
+"""
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as error:
+        return f"cleanup failed for {label}: {error}"
+    output = (completed.stdout or completed.stderr or "").strip()
+    return output or f"cleanup attempted for {label}"
+
+
 def _verify_desktop_expectation(expectation: dict[str, str], attempts: int = 6) -> tuple[bool, str]:
     label = expectation["label"]
-    process = expectation["process"]
+    processes = [
+        item.strip()
+        for item in str(expectation.get("processes") or expectation.get("process") or "").split(",")
+        if item.strip()
+    ]
+    title_keywords = [
+        item.strip().lower()
+        for item in str(expectation.get("title_keywords", "")).split(",")
+        if item.strip()
+    ]
+    last_calculator_message = ""
     for _ in range(attempts):
         snapshot = _windows_process_snapshot()
-        if _process_visible(snapshot, process):
+        if label == "calculator" and expectation.get("expected_result"):
+            verified, message = _verify_calculator_result(str(expectation["expected_result"]))
+            if verified:
+                return True, message
+            last_calculator_message = message
+            time.sleep(1)
+            continue
+        if _process_visible(snapshot, processes, title_keywords):
             return True, f"Verified desktop action: {label} is visible/running."
         time.sleep(1)
+    if last_calculator_message:
+        return False, last_calculator_message
     return False, f"Expected {label} process/window was not visible after OpenCode returned."
+
+
+def _expected_calculator_result(task: str) -> str:
+    result_match = re.search(r"\bresult\s+is\s+(-?\d+(?:\.\d+)?)\b", task, flags=re.IGNORECASE)
+    if result_match:
+        return result_match.group(1)
+    expression_match = re.search(r"(-?\d+(?:\.\d+)?\s*[+\-*/]\s*-?\d+(?:\.\d+)?)", task)
+    if not expression_match:
+        return ""
+    expression = expression_match.group(1).replace(" ", "")
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?[+\-*/]-?\d+(?:\.\d+)?", expression):
+        return ""
+    try:
+        # Safe because the expression is regex-limited to two numeric operands.
+        value = eval(expression, {"__builtins__": {}}, {})  # noqa: S307
+    except Exception:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _verify_calculator_result(expected_result: str) -> tuple[bool, str]:
+    state = _calculator_accessibility_state()
+    if not state:
+        return False, "Calculator result was not visible through accessibility state."
+    display = str(state.get("display", "")).strip()
+    expression = str(state.get("expression", "")).strip()
+    normalized_display = _normalize_calculator_text(display)
+    expected = expected_result.strip()
+    if expected and expected in normalized_display:
+        return True, f"Verified Calculator result: {display or expected}."
+    return False, (
+        "Calculator was visible, but the expected result was not confirmed. "
+        f"Expected {expected}; expression={expression or 'unknown'}; display={display or 'unknown'}."
+    )
+
+
+def _calculator_accessibility_state() -> dict[str, str]:
+    script = r"""
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+$calc = $null
+for ($i = 0; $i -lt $windows.Count; $i++) {
+  $name = $windows.Item($i).Current.Name
+  if ($name -like '*Calculator*') { $calc = $windows.Item($i); break }
+}
+if ($null -eq $calc) { exit 2 }
+$resultCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CalculatorResults')
+$exprCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CalculatorExpression')
+$result = $calc.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $resultCond)
+$expr = $calc.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $exprCond)
+[pscustomobject]@{
+  display = if ($null -eq $result) { '' } else { $result.Current.Name }
+  expression = if ($null -eq $expr) { '' } else { $expr.Current.Name }
+} | ConvertTo-Json -Compress
+"""
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        return {}
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return {}
+    try:
+        data: Any = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _normalize_calculator_text(value: str) -> str:
+    return value.replace(",", "").replace("Display is", "").strip()
 
 
 def _windows_process_snapshot() -> list[dict[str, str]]:
@@ -558,13 +924,18 @@ def _visible_window_titles() -> list[str]:
     return titles[:50]
 
 
-def _process_visible(snapshot: list[dict[str, str]], process: str) -> bool:
-    expected = process.lower()
+def _process_visible(snapshot: list[dict[str, str]], processes: list[str], title_keywords: list[str] | None = None) -> bool:
+    expected_processes = [process.lower() for process in processes]
+    expected_titles = title_keywords or []
     for row in snapshot:
         name = str(row.get("ProcessName", "")).lower()
         title = str(row.get("MainWindowTitle", "")).lower()
-        if name == expected or name.startswith(expected):
+        if name == "applicationframehost":
+            if any(expected in title for expected in expected_titles):
+                return True
+            continue
+        if any(name == expected or name.startswith(expected) for expected in expected_processes):
             return True
-        if expected in title:
+        if any(expected in title for expected in [*expected_processes, *expected_titles]):
             return True
     return False

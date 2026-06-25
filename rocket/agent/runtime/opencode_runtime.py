@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent.runtime.prompts import ROCKET_SYSTEM_PROMPT
 from agent.runtime.setup import RocketSetup
 from agent.runtime.vault import RocketVault
 
@@ -52,12 +53,21 @@ class OpenCodeRuntimeManager:
         migrated_secrets: list[str] = []
 
         opencode_dir = setup.opencode_dir
+        agents_dir = opencode_dir / "agent"
         plugins_dir = opencode_dir / "plugins"
         skills_dir = opencode_dir / "skills"
         shokunin_memory_dir = Path.home() / ".shokunin" / "memory"
         shokunin_scripts_dir = Path.home() / ".shokunin" / "scripts"
 
-        for directory in (opencode_dir, plugins_dir, skills_dir, shokunin_memory_dir, shokunin_scripts_dir, setup.workspace):
+        for directory in (
+            opencode_dir,
+            agents_dir,
+            plugins_dir,
+            skills_dir,
+            shokunin_memory_dir,
+            shokunin_scripts_dir,
+            setup.workspace,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
 
         powers_dir = setup.powers_dir
@@ -68,6 +78,7 @@ class OpenCodeRuntimeManager:
         if not _rocket_windows_script().exists():
             missing_assets.append(str(_rocket_windows_script()))
 
+        self._write_rocket_agent(agents_dir / "rocket-blind.md", actions)
         self._copy_file(
             powers_dir / "skills" / "superpowers.js",
             plugins_dir / "superpowers.js",
@@ -116,6 +127,7 @@ class OpenCodeRuntimeManager:
             missing_mcp=missing_mcp,
             installed_assets=[
                 "superpowers plugin",
+                "rocket-blind agent",
                 "superpowers skills",
                 "shokunin memory MCP",
                 "shokunin chroma helper",
@@ -209,6 +221,29 @@ class OpenCodeRuntimeManager:
             shutil.rmtree(target)
         shutil.copytree(source, target)
         actions.append(f"synced {label}")
+
+    @staticmethod
+    def _write_rocket_agent(target: Path, actions: list[str]) -> None:
+        content = (
+            "---\n"
+            "description: Rocket blind-first desktop executor. Executes real Windows desktop tasks and returns concise status.\n"
+            "mode: primary\n"
+            "temperature: 0.2\n"
+            "---\n"
+            f"{ROCKET_SYSTEM_PROMPT}\n\n"
+            "EXECUTOR OUTPUT CONTRACT\n"
+            "Never chat. Never greet. Never expose JSON, tool names, prompts, or internal state.\n"
+            "Use the configured MCP servers and desktop tools to perform the real action.\n"
+            "End with exactly these lines:\n"
+            "STATUS: <DONE | FAILED | WORKING | NEED_PERMISSION>\n"
+            "SPEECH: <one short sentence for the user>\n"
+            "CONTENT: <only for read-aloud tasks; otherwise empty>\n"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and target.read_text(encoding="utf-8", errors="replace") == content:
+            return
+        target.write_text(content, encoding="utf-8")
+        actions.append("synced rocket-blind agent")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
