@@ -330,7 +330,6 @@ def _success_criteria(intent: str, site: str, app: str = "") -> list[str]:
     if intent == "OPEN_APP" and app:
         return [f"{app}_visible", f"{app}_process_running"]
     if intent == "CALCULATE":
-        expression = _calculator_expression("")
         return ["calculator_visible", "calculator_expression_entered", "calculator_result_visible"]
     if intent == "SEND_MESSAGE":
         app_key = app or (site.split(".", 1)[0] if site else "messaging_app")
