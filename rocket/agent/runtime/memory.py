@@ -18,6 +18,7 @@ class RocketProfile:
     email: str = ""
     phone: str = ""
     address: str = ""
+    country: str = ""
     browser: str = "default"
     editor: str = "code"
     speech_speed: str = "normal"
