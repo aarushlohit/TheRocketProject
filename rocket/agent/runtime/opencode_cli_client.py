@@ -16,6 +16,7 @@ from typing import Any
 
 from agent.runtime.memory import RocketProfile
 from agent.runtime.browser_state import BrowserState, parse_mission, task_display_text
+from agent.runtime.mission_brief import build_mission_brief, cleanup_policy
 from agent.runtime.results import RocketExecutionResult
 from agent.runtime.setup import RocketSetup
 
@@ -210,13 +211,8 @@ class OpenCodeCliClient:
 
     def _build_prompt(self, task: str) -> str:
         mission = parse_mission(task)
-        display_task = task_display_text(task)
-        mission_text = str(mission.get("mission", display_task)) if mission else display_task
-        intent = str(mission.get("intent", "TASK")) if mission else "TASK"
-        context = str(mission.get("context", "desktop")) if mission else "desktop"
-        criteria = mission.get("success_criteria", []) if mission else []
         instructions = mission.get("instructions", []) if mission else []
-        goal = _goal_text(display_task, criteria)
+        brief = build_mission_brief(task)
         profile = json.dumps(asdict(self.profile), ensure_ascii=True)
         setup = json.dumps(self.setup.to_dict(), ensure_ascii=True)
         history = _compact_history(self.history[-8:])
@@ -225,14 +221,9 @@ class OpenCodeCliClient:
         credential_names = sorted(self.setup.credential_refs.keys())
         credential_context = ", ".join(credential_names) if credential_names else "none"
         return (
-            "ROCKET TASK BRIEF\n"
-            f"Mission: {display_task}\n"
-            f"Goal: {goal}\n"
-            f"Intent: {intent}\n"
-            f"Context: {context}\n"
-            f"Executable mission: {mission_text}\n"
-            f"Success criteria: {_compact_list(criteria)}\n"
-            f"Mission instructions: {_compact_list(instructions)}\n\n"
+            f"{brief}\n\n"
+            "MISSION INSTRUCTIONS\n"
+            f"{_compact_list(instructions)}\n\n"
             "AVAILABLE POWERS\n"
             "Use all configured OpenCode MCP servers, skills, plugins, superpowers, rocket-windows, Playwright/browser "
             "tools, vision/computer-use tools, shokunin-memory, shell, and filesystem tools. Choose the tool that best "
@@ -403,13 +394,6 @@ def _tail(text: str | None, limit: int = 1200) -> str:
     if len(text) <= limit:
         return text
     return text[-limit:]
-
-
-def _goal_text(display_task: str, criteria: Any) -> str:
-    criteria_text = _compact_list(criteria)
-    if criteria_text == "none":
-        return f"Complete and verify: {display_task}"
-    return f"Complete and verify: {display_task}. Observable success: {criteria_text}."
 
 
 def _compact_list(values: Any) -> str:
@@ -698,21 +682,10 @@ def _cleanup_after_success(task: str, expectation: dict[str, str]) -> str:
 
 def _should_cleanup_after_success(task: str, expectation: dict[str, str]) -> bool:
     label = str(expectation.get("label", "")).lower()
-    lower = task_display_text(task).lower()
-    mission = parse_mission(task)
-    intent = str(mission.get("intent", "")).upper() if mission else ""
-
-    if any(phrase in lower for phrase in ("keep open", "leave open", "do not close", "don't close", "stay open")):
-        return False
-    if any(phrase in lower for phrase in ("watch", "play video", "listen", "read", "open youtube", "open chrome")):
-        return False
+    # Persistent apps are always kept open for reuse regardless of mission text.
     if label in {"chrome", "edge", "youtube", "spotify", "whatsapp", "vscode", "code"}:
         return False
-    if intent in {"CALCULATE"}:
-        return True
-    if label in {"calculator", "notepad"} and any(word in lower for word in ("calculate", "calc", "temporary", "quick")):
-        return True
-    return False
+    return cleanup_policy(parse_mission(task)) == "temporary"
 
 
 def _close_expected_app(expectation: dict[str, str]) -> str:

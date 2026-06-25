@@ -55,9 +55,8 @@
         "npx.cmd",
         "-y",
         "@playwright/mcp@latest",
-        "--isolated",
-        "--executable-path",
-        "C:\\Users\\Aarush\\AppData\\Local\\ms-playwright\\chromium-1228\\chrome-win64\\chrome.exe"
+        "--browser",
+        "chrome"
       ],
       "enabled": true
     },
