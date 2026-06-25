@@ -465,6 +465,15 @@ class VerifierSuite:
         self.bluetooth = BluetoothVerifier(self.probe)
         self.wifi = WifiVerifier(self.probe)
 
+    def can_verify(self, mission: dict[str, Any]) -> bool:
+        """Whether the suite has a concrete reality check for this mission.
+
+        Missions outside this set (file edits, generic shell, etc.) are deferred
+        to the executor's own result rather than failed closed.
+        """
+
+        return self._route(mission) is not None
+
     def verify_mission(self, mission: dict[str, Any]) -> Verdict:
         """Dispatch a compiled mission to the correct reality verifier.
 
@@ -472,19 +481,31 @@ class VerifierSuite:
         check fails closed rather than reporting a false success.
         """
 
+        route = self._route(mission)
+        if route is None:
+            text = str(mission.get("mission", "")) if isinstance(mission, dict) else ""
+            intent = str(mission.get("intent", "")) if isinstance(mission, dict) else ""
+            if not isinstance(mission, dict):
+                return Verdict("VerifierSuite", False, "There is no mission to verify.")
+            return Verdict("VerifierSuite", False, f"I cannot yet verify this goal in reality: {text or intent}.")
+        return route()
+
+    def _route(self, mission: dict[str, Any]):
+        """Return a zero-arg verifier call for the mission, or ``None``."""
+
         if not isinstance(mission, dict):
-            return Verdict("VerifierSuite", False, "There is no mission to verify.")
+            return None
         intent = str(mission.get("intent", "")).upper()
         context = str(mission.get("context", "")).strip().lower()
         text = str(mission.get("mission", ""))
         lower = text.lower()
 
-        if intent == "INSTALL" or "install" in lower:
-            return self.install.verify(_install_key_from_text(lower))
+        if _is_install_request(intent, lower):
+            return lambda: self.install.verify(_install_key_from_text(lower))
         if "bluetooth" in lower:
-            return self.bluetooth.verify(expected_enabled=not _is_disable(lower))
+            return lambda: self.bluetooth.verify(expected_enabled=not _is_disable(lower))
         if re.search(r"\bwi[\s-]?fi\b", lower):
-            return self.wifi.verify(expected_connected=not _is_disable(lower))
+            return lambda: self.wifi.verify(expected_connected=not _is_disable(lower))
         if intent in {"SEARCH", "PLAY", "PAUSE", "RESUME", "OPEN"} and context in {
             "youtube.com",
             "spotify.com",
@@ -494,13 +515,25 @@ class VerifierSuite:
             "reddit.com",
             "browser",
         }:
-            return self.browser.verify(
+            return lambda: self.browser.verify(
                 expected_site=None if context == "browser" else context,
                 expect_playing=_expected_playing(intent),
             )
         if intent == "OPEN_APP" and context in APP_PROCESSES:
-            return self.process.verify(APP_PROCESSES[context], label=context)
-        return Verdict("VerifierSuite", False, f"I cannot yet verify this goal in reality: {text or intent}.")
+            return lambda: self.process.verify(APP_PROCESSES[context], label=context)
+        return None
+
+
+def _is_install_request(intent: str, lower: str) -> bool:
+    """True for install intents/verbs, but not the word "installed".
+
+    Compiled OPEN_APP missions read "Open installed X application"; that must not
+    be treated as an install request.
+    """
+
+    if intent == "INSTALL":
+        return True
+    return bool(re.search(r"\binstall(?:ing|s|ation)?\b", lower))
 
 
 def _install_key_from_text(lower: str) -> str:

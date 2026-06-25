@@ -13,17 +13,19 @@ from agent.runtime.opencode_cli_client import OpenCodeCliClient
 from agent.runtime.opencode_runtime import OpenCodeRuntimeManager, RuntimeReadinessReport
 from agent.runtime.results import RocketExecutionResult
 from agent.runtime.setup import RocketSetup
+from agent.runtime.verifier import VerifierSuite
 
 
 class RocketAdapter:
     """Invisible OpenCode CLI adapter behind the Rocket task string."""
 
-    def __init__(self, repo_root: Path, data_dir: Path) -> None:
+    def __init__(self, repo_root: Path, data_dir: Path, verifier_suite: VerifierSuite | None = None) -> None:
         self.repo_root = repo_root
         self.data_dir = data_dir / "phase2"
         self.memory = RocketMemory(self.data_dir)
         self.setup = RocketSetup.from_dict(self.memory.get("setup"))
         self.profile = self._load_profile()
+        self.verifier_suite = verifier_suite or VerifierSuite()
         self.runtime = OpenCodeRuntimeManager(self.data_dir, setup=self.setup)
         self.opencode = OpenCodeCliClient(
             repo_root=repo_root,
@@ -98,6 +100,7 @@ class RocketAdapter:
         self.opencode.session_id = str(self.memory.get("opencode_session_id", "") or "")
         self.opencode.browser_state = self._browser_state()
         result = self.opencode.execute(task)
+        result = apply_verifier(result, task, self.verifier_suite)
         self._remember_execution(result)
         return result
 
@@ -158,3 +161,38 @@ def _session_id_from_details(details: list[str]) -> str:
         if detail.startswith("session_id="):
             return detail.split("=", 1)[1].strip()
     return ""
+
+
+def apply_verifier(
+    result: RocketExecutionResult,
+    task: str,
+    suite: VerifierSuite,
+) -> RocketExecutionResult:
+    """Let reality decide the outcome for missions the suite can verify.
+
+    Rocket trusts the verifier, not OpenCode's words. When the suite has a
+    concrete check for this mission, its verdict is authoritative: it can both
+    confirm a success and overturn a false success. Missions the suite cannot
+    map (e.g. file edits) keep the executor's own result.
+    """
+
+    if os.getenv("ROCKET_VERIFIER_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+        return result
+    mission = parse_mission(task)
+    if mission is None or not suite.can_verify(mission):
+        return result
+    verdict = suite.verify_mission(mission)
+    details = [
+        *result.details,
+        f"verifier={verdict.verifier}",
+        f"verifier_passed={verdict.passed}",
+        f"opencode_reported_success={result.success}",
+    ]
+    return RocketExecutionResult(
+        task=result.task,
+        intent=result.intent,
+        executor=result.executor,
+        success=verdict.passed,
+        message=verdict.spoken,
+        details=details,
+    )
