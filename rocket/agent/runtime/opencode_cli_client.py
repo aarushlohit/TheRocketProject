@@ -221,6 +221,16 @@ class OpenCodeCliClient:
         credential_names = sorted(self.setup.credential_refs.keys())
         credential_context = ", ".join(credential_names) if credential_names else "none"
         return (
+            "HARD RULES (NEVER VIOLATE)\n"
+            "1. NEVER open an app that is ALREADY OPEN. Check processes/windows FIRST. "
+            "If it exists: FOCUS it, RESTORE it, MAXIMIZE it. NEVER launch a duplicate.\n"
+            "2. CLOSE apps after task completion UNLESS the user needs them (YouTube playing, Spotify, active browsing). "
+            "Calculator: CLOSE after result. Settings: CLOSE after toggle. Weather: CLOSE tab.\n"
+            "3. EVERY window you interact with MUST be MAXIMIZED and in the FOREGROUND. "
+            "Never work in small/background/minimized windows. Maximize IMMEDIATELY after focus.\n"
+            "4. REUSE over LAUNCH. If Chrome exists, reuse it. If a tab exists for the site, switch to it. "
+            "Never open a new window or tab when one already exists for the target.\n"
+            "5. Use REAL Chrome with default profile. Never use sandbox/isolated/temporary browsers.\n\n"
             f"{brief}\n\n"
             "MISSION INSTRUCTIONS\n"
             f"{_compact_list(instructions)}\n\n"
