@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -12,6 +13,8 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from agent.adapters.pollinations import PollinationsAdapter, _clean_task
+from agent.adapters.speech import SpeechManager
+from agent.adapters.vision import VisionManager
 from agent.adapters.prompts import (
     ROCKET_MISSION_COMPILER_SYSTEM_PROMPT,
     ROCKET_PARSER_SYSTEM_PROMPT,
@@ -46,6 +49,8 @@ class NemotronAdapter:
         self,
         fallback: PollinationsAdapter | None = None,
         model: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        vision: VisionManager | None = None,
+        speech: SpeechManager | None = None,
     ) -> None:
         self.model = model
         self.fallback = fallback
@@ -53,10 +58,14 @@ class NemotronAdapter:
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=os.getenv("NVIDIA_API_KEY", ""),
         )
+        self.vision = vision if vision is not None else VisionManager()
+        self.speech = speech if speech is not None else SpeechManager()
         self.status: dict[str, str] = {
             "Nemotron": "unchecked",
             "MissionCompiler": "unchecked",
             "Pollinations": "configured" if fallback else "disabled",
+            "KimiVision": "configured" if self.vision.available else "disabled",
+            "RivaSpeech": "configured" if self.speech.available else "disabled",
         }
         self._last_task = ""
         self._active_app = ""
@@ -67,6 +76,8 @@ class NemotronAdapter:
 
     async def health_check(self) -> None:
         self.status["Nemotron"] = "configured" if os.getenv("NVIDIA_API_KEY") else "missing NVIDIA_API_KEY"
+        self.status["KimiVision"] = "configured" if self.vision.available else "disabled"
+        self.status["RivaSpeech"] = "configured" if self.speech.available else "disabled"
 
     def set_profile_context(self, profile: dict[str, Any] | None, system_prompt: str = "") -> None:
         if not profile:
@@ -117,6 +128,23 @@ class NemotronAdapter:
         self._runtime_context = json.dumps(compact, ensure_ascii=True)
 
     async def process_image(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
+        if self.vision.available:
+            try:
+                raw_command = await self.vision.parse_command(
+                    image_bytes,
+                    mime_type=mime_type,
+                    system_prompt=ROCKET_PARSER_SYSTEM_PROMPT,
+                    user_prompt=parser_user_prompt("image", context=self._context_text()),
+                )
+                self.status["KimiVision"] = "ok"
+                task = await self._compile_with_mission_model(_clean_task(raw_command))
+                if task:
+                    if _should_remember_task(task):
+                        self._remember_task(task)
+                    return task
+            except Exception as error:
+                self.status["KimiVision"] = f"fallback: {error}"
+
         data_url = _data_url(mime_type, image_bytes)
         content: list[dict[str, Any]] = [
             {"type": "text", "text": parser_user_prompt("image", context=self._context_text())},
@@ -125,6 +153,20 @@ class NemotronAdapter:
         return await self._complete("image", content)
 
     async def process_audio(self, audio_bytes: bytes, audio_format: str = "wav") -> str:
+        if self.speech.available:
+            try:
+                transcript = await asyncio.to_thread(
+                    self.speech.transcribe, audio_bytes, audio_format=audio_format
+                )
+                self.status["RivaSpeech"] = "ok"
+                task = await self._compile_with_mission_model(_clean_task(transcript))
+                if task:
+                    if _should_remember_task(task):
+                        self._remember_task(task)
+                    return task
+            except Exception as error:
+                self.status["RivaSpeech"] = f"fallback: {error}"
+
         encoded_audio = base64.b64encode(audio_bytes).decode("ascii")
         normalized_format = _audio_format(audio_format)
         content: list[dict[str, Any]] = [
