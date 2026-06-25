@@ -1,6 +1,6 @@
 """Rocket OpenCode runtime package."""
 
-from agent.runtime.adapter import RocketAdapter
+from agent.runtime.adapter import RocketAdapter, apply_verifier, run_with_recovery
 from agent.runtime.bootstrap import rocket_bootstrap, sync_opencode_runtime
 from agent.runtime.first_launch import (
     BootstrapMarkers,
@@ -62,6 +62,8 @@ from agent.runtime.verifier import (
 
 __all__ = [
     "RocketAdapter",
+    "apply_verifier",
+    "run_with_recovery",
     "Phase2TerminalBridge",
     "RuntimeTerminalBridge",
     "rocket_bootstrap",

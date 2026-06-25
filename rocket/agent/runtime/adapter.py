@@ -11,6 +11,7 @@ from agent.runtime.memory import RocketMemory, RocketProfile
 from agent.runtime.browser_state import BrowserState, parse_mission, predict_browser_state
 from agent.runtime.opencode_cli_client import OpenCodeCliClient
 from agent.runtime.opencode_runtime import OpenCodeRuntimeManager, RuntimeReadinessReport
+from agent.runtime.recovery import RecoveryEngine, RecoveryStrategy
 from agent.runtime.results import RocketExecutionResult
 from agent.runtime.setup import RocketSetup
 from agent.runtime.verifier import VerifierSuite
@@ -99,8 +100,7 @@ class RocketAdapter:
         self.opencode.history = self._history()
         self.opencode.session_id = str(self.memory.get("opencode_session_id", "") or "")
         self.opencode.browser_state = self._browser_state()
-        result = self.opencode.execute(task)
-        result = apply_verifier(result, task, self.verifier_suite)
+        result = run_with_recovery(task, self.opencode.execute, self.verifier_suite)
         self._remember_execution(result)
         return result
 
@@ -194,5 +194,94 @@ def apply_verifier(
         executor=result.executor,
         success=verdict.passed,
         message=verdict.spoken,
+        details=details,
+    )
+
+
+def _recovery_enabled() -> bool:
+    return os.getenv("ROCKET_RECOVERY_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+
+
+def _recovery_retries() -> int:
+    try:
+        return max(0, int(os.getenv("ROCKET_RECOVERY_MAX_RETRIES", "1")))
+    except ValueError:
+        return 1
+
+
+_RECOVERY_SPEECH = {
+    RecoveryStrategy.RETRY: "Recovery in progress. Retrying.",
+    RecoveryStrategy.REUSE_BROWSER: "Recovery in progress. Reusing the open browser.",
+    RecoveryStrategy.RESTORE_BROWSER: "Recovery in progress. Restoring the browser window.",
+    RecoveryStrategy.RECONNECT_PLAYWRIGHT: "Recovery in progress. Reconnecting the browser controller.",
+    RecoveryStrategy.RECONNECT_OPENCODE: "Recovery in progress. Reconnecting the runtime.",
+    RecoveryStrategy.REUSE_SESSION: "Recovery in progress. Reusing the previous session.",
+    RecoveryStrategy.ALTERNATIVE_MCP: "Recovery in progress. Trying another tool.",
+    RecoveryStrategy.VISION_FALLBACK: "Recovery in progress. Looking at the screen.",
+    RecoveryStrategy.ALTERNATIVE_STRATEGY: "Recovery in progress. Trying a different approach.",
+    RecoveryStrategy.ASK_USER: "I could not complete this safely. I need your help.",
+}
+
+
+def _recovery_speech(strategy: RecoveryStrategy) -> str:
+    return _RECOVERY_SPEECH.get(strategy, "Recovery in progress.")
+
+
+def run_with_recovery(
+    task: str,
+    executor,
+    suite: VerifierSuite,
+    *,
+    max_retries: int | None = None,
+    engine: RecoveryEngine | None = None,
+    feedback=None,
+) -> RocketExecutionResult:
+    """Execute, verify, and heal until reality confirms the goal or help is needed.
+
+    Loop: OpenCode executes -> verifier proves -> on failure the recovery engine
+    picks the next strategy and we retry + re-verify. Asking the user is the last
+    resort. Recovery metrics are attached to the result details.
+    """
+
+    feedback = feedback or (lambda _message: None)
+    retries = _recovery_retries() if max_retries is None else max_retries
+    engine = engine or RecoveryEngine(max_attempts=max(1, retries))
+
+    result = apply_verifier(executor(task), task, suite)
+    if result.success or not _recovery_enabled() or retries <= 0:
+        return _with_recovery_details(result, engine)
+
+    engine.begin(result.message)
+    while not result.success:
+        strategy = engine.next_strategy()
+        if strategy is RecoveryStrategy.ASK_USER:
+            feedback(_recovery_speech(strategy))
+            break
+        feedback(_recovery_speech(strategy))
+        result = apply_verifier(executor(task), task, suite)
+
+    if result.success:
+        engine.record_success()
+        feedback(result.message)
+    return _with_recovery_details(result, engine)
+
+
+def _with_recovery_details(result: RocketExecutionResult, engine: RecoveryEngine) -> RocketExecutionResult:
+    metrics = engine.metrics
+    if metrics.attempts == 0 and not metrics.recovery_reason:
+        return result
+    details = [
+        *result.details,
+        f"recovery_attempts={metrics.attempts}",
+        f"recovery_count={metrics.recovery_count}",
+        f"recovery_reason={metrics.recovery_reason}",
+        f"recovery_success={metrics.recovery_success}",
+    ]
+    return RocketExecutionResult(
+        task=result.task,
+        intent=result.intent,
+        executor=result.executor,
+        success=result.success,
+        message=result.message,
         details=details,
     )
