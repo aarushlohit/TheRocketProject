@@ -35,6 +35,7 @@ from agent.runtime.benchmark import (
     run_benchmark,
     simulated_executor,
 )
+from agent.runtime.benchmark_live import RocketAdapterExecutor, run_live_benchmark
 from agent.runtime.browser_runtime import (
     BrowserController,
     BrowserRuntime,
@@ -93,6 +94,8 @@ __all__ = [
     "generate_default_suite",
     "run_benchmark",
     "simulated_executor",
+    "RocketAdapterExecutor",
+    "run_live_benchmark",
     "BrowserController",
     "BrowserRuntime",
     "BrowserRuntimeState",
