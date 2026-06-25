@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from agent.adapters.nemotron import NemotronAdapter
-from agent.runtime.browser_state import mission_to_task
 from agent.runtime.mission_brief import (
     WindowPolicy,
     build_mission_brief,

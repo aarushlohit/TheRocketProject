@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from agent.runtime.browser_state import BrowserState, compile_browser_mission, mission_to_task
+from agent.runtime.browser_state import BrowserState, compile_browser_mission
 from agent.runtime.recovery import RecoveryEngine
 from agent.runtime.verifier import APP_PROCESSES, RealityProbe, VerifierSuite, _is_install_request
 
