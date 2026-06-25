@@ -19,6 +19,22 @@ from agent.runtime.install_mission import (
     WindowsUacProbe,
     install_key_from_mission,
 )
+from agent.runtime.recovery import (
+    RecoveryEngine,
+    RecoveryMetrics,
+    RecoveryStrategy,
+    classify_failure,
+    recovery_plan,
+)
+from agent.runtime.benchmark import (
+    BenchmarkReport,
+    BenchmarkResult,
+    BenchmarkTask,
+    ExecOutcome,
+    generate_default_suite,
+    run_benchmark,
+    simulated_executor,
+)
 from agent.runtime.browser_runtime import (
     BrowserController,
     BrowserRuntime,
@@ -63,6 +79,18 @@ __all__ = [
     "UacProbe",
     "WindowsUacProbe",
     "install_key_from_mission",
+    "RecoveryEngine",
+    "RecoveryMetrics",
+    "RecoveryStrategy",
+    "classify_failure",
+    "recovery_plan",
+    "BenchmarkReport",
+    "BenchmarkResult",
+    "BenchmarkTask",
+    "ExecOutcome",
+    "generate_default_suite",
+    "run_benchmark",
+    "simulated_executor",
     "BrowserController",
     "BrowserRuntime",
     "BrowserRuntimeState",
