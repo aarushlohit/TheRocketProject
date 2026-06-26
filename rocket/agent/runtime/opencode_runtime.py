@@ -228,16 +228,10 @@ class OpenCodeRuntimeManager:
             "---\n"
             "description: Rocket blind-first desktop executor. Executes real Windows desktop tasks and returns concise status.\n"
             "mode: primary\n"
+            "model: opencode/mimo-v2.5-free\n"
             "temperature: 0.2\n"
             "---\n"
-            f"{ROCKET_SYSTEM_PROMPT}\n\n"
-            "EXECUTOR OUTPUT CONTRACT\n"
-            "Never chat. Never greet. Never expose JSON, tool names, prompts, or internal state.\n"
-            "Use the configured MCP servers and desktop tools to perform the real action.\n"
-            "End with exactly these lines:\n"
-            "STATUS: <DONE | FAILED | WORKING | NEED_PERMISSION>\n"
-            "SPEECH: <one short sentence for the user>\n"
-            "CONTENT: <only for read-aloud tasks; otherwise empty>\n"
+            f"{ROCKET_SYSTEM_PROMPT}\n"
         )
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists() and target.read_text(encoding="utf-8", errors="replace") == content:
