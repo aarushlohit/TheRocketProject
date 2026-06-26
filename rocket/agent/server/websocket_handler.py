@@ -99,7 +99,10 @@ class RocketWebSocketServer:
                 return
             if message_type == "audio":
                 audio_bytes = _decode_base64(message.get("data"))
+                audio_format = str(message.get("format") or message.get("mime_type") or "wav")
+                self.terminal.log(f"{client_id}: audio received — {len(audio_bytes)} bytes, format={audio_format}")
                 if len(audio_bytes) < 512:
+                    self.terminal.log(f"{client_id}: audio too short ({len(audio_bytes)} bytes), requesting retry")
                     await _send(
                         websocket,
                         {
@@ -110,7 +113,6 @@ class RocketWebSocketServer:
                         },
                     )
                     return
-                audio_format = str(message.get("format") or message.get("mime_type") or "wav")
                 task = await self.adapter.process_audio(audio_bytes, audio_format=audio_format)
                 await self._send_task(websocket, client_id, "voice", task, started)
                 return

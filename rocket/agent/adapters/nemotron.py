@@ -166,7 +166,7 @@ class NemotronAdapter:
                     return task
             except Exception as error:
                 self.status["Speech"] = f"fallback: {error}"
-
+                import sys; print(f"[Speech] all paths failed: {error}", file=sys.stderr)
         encoded_audio = base64.b64encode(audio_bytes).decode("ascii")
         normalized_format = _audio_format(audio_format)
         content: list[dict[str, Any]] = [

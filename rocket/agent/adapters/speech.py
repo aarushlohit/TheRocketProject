@@ -103,14 +103,17 @@ class SpeechManager:
         (Google API) → Riva. Raises only if ALL paths fail.
         """
 
+        errors: list[str] = []
+
         # 1. faster-whisper (best accuracy, runs locally)
         try:
             transcript = self._transcribe_whisper(audio_bytes)
             if transcript:
                 self.status = "ok (whisper-local)"
                 return transcript
-        except Exception:
-            pass
+            errors.append("whisper: empty transcript")
+        except Exception as e:
+            errors.append(f"whisper: {e}")
 
         # 2. speech_recognition (Google free API)
         try:
@@ -118,8 +121,9 @@ class SpeechManager:
             if transcript:
                 self.status = "ok (google)"
                 return transcript
-        except Exception:
-            pass
+            errors.append("google: empty transcript")
+        except Exception as e:
+            errors.append(f"google: {e}")
 
         # 3. Riva if available
         if self._riva_available():
@@ -128,10 +132,12 @@ class SpeechManager:
                 if transcript:
                     self.status = "ok (riva)"
                     return transcript
-            except Exception:
-                pass
+                errors.append("riva: empty transcript")
+            except Exception as e:
+                errors.append(f"riva: {e}")
 
-        raise RuntimeError("All speech-to-text paths failed (whisper + google + riva).")
+        self.status = f"failed: {'; '.join(errors)}"
+        raise RuntimeError(f"All speech-to-text paths failed: {'; '.join(errors)}")
 
     def _transcribe_whisper(self, audio_bytes: bytes) -> str:
         """Transcribe using faster-whisper (local Whisper model)."""
