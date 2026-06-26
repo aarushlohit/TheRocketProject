@@ -158,9 +158,11 @@ class NemotronAdapter:
                 transcript = await asyncio.to_thread(
                     self.speech.transcribe, audio_bytes, audio_format=audio_format
                 )
-                self.status["Speech"] = "ok"
-                task = await self._compile_with_mission_model(_clean_task(transcript))
-                if task:
+                if transcript and transcript.strip():
+                    # Compile directly from transcript — skip the slow mission compiler LLM call.
+                    # The transcript is already clean speech; compile_browser_mission handles intent.
+                    task = self._compile_task(transcript.strip())
+                    self.status["Speech"] = "ok"
                     if _should_remember_task(task):
                         self._remember_task(task)
                     return task
