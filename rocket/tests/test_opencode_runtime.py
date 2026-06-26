@@ -45,21 +45,21 @@ class OpenCodeRuntimeTests(unittest.TestCase):
         self.assertEqual(client.models, list(DEFAULT_OPENCODE_MODELS))
         self.assertEqual(client.model, "opencode/mimo-v2.5-free")
 
-    def test_opencode_timeout_is_disabled_by_default(self) -> None:
+    def test_opencode_timeout_defaults_to_60_seconds(self) -> None:
         env = os.environ.copy()
         env.pop("ROCKET_OPENCODE_TIMEOUT_SECONDS", None)
         with patch.dict("os.environ", env, clear=True):
-            self.assertIsNone(_configured_timeout())
+            self.assertEqual(_configured_timeout(), 60)
 
-    def test_opencode_direct_fresh_execution_is_default(self) -> None:
+    def test_opencode_persistent_server_is_default(self) -> None:
         env = os.environ.copy()
         env.pop("ROCKET_OPENCODE_PERSISTENT_SERVER", None)
         env.pop("ROCKET_OPENCODE_REUSE_SESSION", None)
         with patch.dict("os.environ", env, clear=True):
             client = OpenCodeCliClient(Path.cwd(), profile=RocketProfile(), session_id="ses_old")
 
-        self.assertFalse(client.persistent_server)
-        self.assertFalse(client.reuse_session)
+        self.assertTrue(client.persistent_server)
+        self.assertTrue(client.reuse_session)
         self.assertEqual(client.output_format, "default")
 
     def test_prompt_uses_all_powers_and_compact_human_mission(self) -> None:

@@ -52,6 +52,15 @@ If a tab with the target site exists: switch to that tab.
 NEVER open a new browser window when one exists.
 NEVER open a new tab for a site that already has a tab open.
 Focus -> Restore -> Maximize -> Navigate. In that order.
+If Chrome is ALREADY RUNNING, use computer-use/vision/screenshot tools to control it directly.
+Only use Playwright MCP when Chrome is NOT already open.
+
+RULE 6: ACT FAST. NO UNNECESSARY REASONING.
+Do NOT think at length. Do NOT plan multi-step before acting.
+One screenshot -> one action -> verify -> done.
+Execute IMMEDIATELY. Only reason when genuinely ambiguous or recovering from failure.
+Never write paragraphs of analysis. Never explain what you are about to do.
+Just DO IT.
 
 # ═══════════════════════════════════════════════════════════════════
 

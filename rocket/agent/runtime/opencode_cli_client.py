@@ -61,10 +61,10 @@ class OpenCodeCliClient:
         self.output_format = os.getenv("ROCKET_OPENCODE_FORMAT", "default").strip().lower() or "default"
         self.print_logs = os.getenv("ROCKET_OPENCODE_PRINT_LOGS", "1").strip().lower() not in {"0", "false", "no"}
         self.persistent_server = (
-            os.getenv("ROCKET_OPENCODE_PERSISTENT_SERVER", "0").strip().lower() in {"1", "true", "yes", "on"}
+            os.getenv("ROCKET_OPENCODE_PERSISTENT_SERVER", "1").strip().lower() in {"1", "true", "yes", "on"}
         )
         self.reuse_session = (
-            os.getenv("ROCKET_OPENCODE_REUSE_SESSION", "0").strip().lower() in {"1", "true", "yes", "on"}
+            os.getenv("ROCKET_OPENCODE_REUSE_SESSION", "1").strip().lower() in {"1", "true", "yes", "on"}
         )
 
     def available(self) -> bool:
@@ -230,7 +230,12 @@ class OpenCodeCliClient:
             "Never work in small/background/minimized windows. Maximize IMMEDIATELY after focus.\n"
             "4. REUSE over LAUNCH. If Chrome exists, reuse it. If a tab exists for the site, switch to it. "
             "Never open a new window or tab when one already exists for the target.\n"
-            "5. Use REAL Chrome with default profile. Never use sandbox/isolated/temporary browsers.\n\n"
+            "5. Use REAL Chrome with default profile. Never use sandbox/isolated/temporary browsers. "
+            "If Chrome is already open, use computer-use/vision tools to control it directly. "
+            "Only use Playwright when Chrome is NOT already running.\n"
+            "6. ACT FAST. Do NOT reason or plan at length. Execute the action IMMEDIATELY. "
+            "One screenshot, one action, verify, done. No multi-paragraph thinking. No step-by-step explanations. "
+            "Only reason when the task is genuinely ambiguous or recovery is needed.\n\n"
             f"{brief}\n\n"
             "MISSION INSTRUCTIONS\n"
             f"{_compact_list(instructions)}\n\n"
@@ -468,8 +473,8 @@ def _configured_models() -> list[str]:
 
 
 def _configured_timeout() -> int | None:
-    value = os.getenv("ROCKET_OPENCODE_TIMEOUT_SECONDS", "").strip().lower()
-    if value in {"", "0", "none", "false", "no", "off"}:
+    value = os.getenv("ROCKET_OPENCODE_TIMEOUT_SECONDS", "60").strip().lower()
+    if value in {"0", "none", "false", "no", "off"}:
         return None
     return int(value)
 

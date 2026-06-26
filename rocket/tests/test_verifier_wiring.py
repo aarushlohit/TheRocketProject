@@ -6,8 +6,39 @@ from unittest.mock import patch
 from agent.runtime.adapter import apply_verifier
 from agent.runtime.browser_state import compile_browser_mission, mission_to_task, BrowserState
 from agent.runtime.results import RocketExecutionResult
-from agent.runtime.verifier import VerifierSuite
-from tests.test_verifier import FakeProbe
+from agent.runtime.verifier import RealityProbe, VerifierSuite
+
+
+class FakeProbe(RealityProbe):
+    def __init__(self, *, processes=None, windows=None, executable=None, path_exists=None, bluetooth=None, wifi=None, browser=None):
+        self._processes = processes
+        self._windows = windows
+        self._executable = executable
+        self._path_exists = path_exists
+        self._bluetooth = bluetooth
+        self._wifi = wifi
+        self._browser = browser
+
+    def running_processes(self):
+        return self._processes
+
+    def windows(self):
+        return self._windows
+
+    def find_executable(self, executables, search_paths):
+        return self._executable
+
+    def path_exists(self, path):
+        return self._path_exists
+
+    def bluetooth_enabled(self):
+        return self._bluetooth
+
+    def wifi_connected(self):
+        return self._wifi
+
+    def browser_state(self):
+        return self._browser
 
 
 def _result(success: bool, message: str = "OpenCode says done") -> RocketExecutionResult:

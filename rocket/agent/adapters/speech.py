@@ -2,16 +2,17 @@
 
 Primary ASR: NVIDIA Riva ``whisper-large-v3`` served through
 ``grpc.nvcf.nvidia.com`` (gRPC). Multilingual auto-detection is enabled by
-using the ``multi`` language code. The Nemotron Omni audio path remains the
-fallback and lives in :mod:`agent.adapters.nemotron`.
+using the ``multi`` language code.
 
-``nvidia-riva-client`` is an optional dependency. If it is not installed or no
-API key is present, :attr:`SpeechManager.available` is ``False`` and the caller
-falls back to Nemotron Omni transparently.
+Local fallback: Python ``speech_recognition`` library using Google's free web
+speech API. No API key needed. Works when Riva is unavailable or returns empty.
+
+Final fallback: Nemotron Omni audio path in :mod:`agent.adapters.nemotron`.
 """
 
 from __future__ import annotations
 
+import io
 import os
 
 RIVA_SERVER = "grpc.nvcf.nvidia.com:443"
@@ -40,13 +41,26 @@ class SpeechManager:
 
     @property
     def available(self) -> bool:
-        """Whether the primary Riva path can be attempted."""
+        """Whether any speech-to-text path can be attempted.
 
-        if os.getenv("ROCKET_DISABLE_RIVA_SPEECH"):
+        Always True when ``speech_recognition`` is installed (local fallback).
+        """
+
+        if os.getenv("ROCKET_DISABLE_SPEECH"):
             return False
         if self._asr_service is not None:
             return True
-        if not self._api_key:
+        if self._api_key:
+            try:
+                import riva.client  # noqa: F401
+                return True
+            except Exception:
+                pass
+        # Local fallback via speech_recognition
+        try:
+            import speech_recognition  # noqa: F401
+            return True
+        except Exception:
             return False
         try:
             import riva.client  # noqa: F401
@@ -72,19 +86,64 @@ class SpeechManager:
     def transcribe(self, audio_bytes: bytes, *, audio_format: str = "wav") -> str:
         """Return the transcript for ``audio_bytes``.
 
-        Audio must be mono 16-bit PCM in WAV/FLAC/OPUS. Raises on any failure so
-        the caller can fall back to Nemotron Omni.
+        Tries Riva first, then falls back to local speech_recognition (Google
+        free web API). Raises only if ALL paths fail.
         """
 
-        del audio_format  # Riva detects the container from the audio header.
+        # Try Riva first if available
+        if self._riva_available():
+            try:
+                transcript = self._transcribe_riva(audio_bytes)
+                if transcript:
+                    self.status = "ok (riva)"
+                    return transcript
+            except Exception:
+                pass
+
+        # Local fallback via speech_recognition
+        try:
+            transcript = self._transcribe_local(audio_bytes, audio_format)
+            if transcript:
+                self.status = "ok (local)"
+                return transcript
+        except Exception:
+            pass
+
+        raise RuntimeError("All speech-to-text paths failed (Riva + local).")
+
+    def _riva_available(self) -> bool:
+        if self._asr_service is not None:
+            return True
+        if not self._api_key:
+            return False
+        try:
+            import riva.client  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    def _transcribe_riva(self, audio_bytes: bytes) -> str:
         service = self._ensure_service()
         config = self._build_config(audio_bytes)
         response = service.offline_recognize(audio_bytes, config)
-        transcript = _first_transcript(response)
-        if not transcript:
-            raise RuntimeError("Riva returned an empty transcript.")
-        self.status = "ok"
-        return transcript
+        return _first_transcript(response)
+
+    def _transcribe_local(self, audio_bytes: bytes, audio_format: str = "wav") -> str:
+        """Transcribe using Python speech_recognition (Google free API)."""
+
+        import speech_recognition as sr
+
+        recognizer = sr.Recognizer()
+        audio_file = io.BytesIO(audio_bytes)
+        with sr.AudioFile(audio_file) as source:
+            audio_data = recognizer.record(source)
+        try:
+            text = recognizer.recognize_google(audio_data)
+        except sr.UnknownValueError:
+            return ""
+        except sr.RequestError:
+            return ""
+        return str(text).strip() if text else ""
 
     def _build_config(self, audio_bytes: bytes):
         try:
