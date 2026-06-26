@@ -1,22 +1,24 @@
 """Speech transcription manager.
 
-Primary ASR: NVIDIA Riva ``whisper-large-v3`` served through
-``grpc.nvcf.nvidia.com`` (gRPC). Multilingual auto-detection is enabled by
-using the ``multi`` language code.
+Primary ASR: **faster-whisper** (Whisper large-v3 running locally via CTranslate2).
+Extremely accurate, multilingual, handles accents/noise, runs entirely on-device.
+No API key needed. No network latency.
 
-Local fallback: Python ``speech_recognition`` library using Google's free web
-speech API. No API key needed. Works when Riva is unavailable or returns empty.
-
-Final fallback: Nemotron Omni audio path in :mod:`agent.adapters.nemotron`.
+Fallback chain: faster-whisper → speech_recognition (Google) → Riva → Nemotron Omni.
 """
 
 from __future__ import annotations
 
 import io
 import os
+import tempfile
 
 RIVA_SERVER = "grpc.nvcf.nvidia.com:443"
 RIVA_FUNCTION_ID = "b702f636-f60c-4a3d-a6f4-f3568c13bd7d"
+
+# Whisper model size — "base" is fast, "small" is accurate, "medium" is very accurate.
+# "large-v3" is best but needs ~3GB RAM. Default to "base" for speed; override with env.
+DEFAULT_WHISPER_MODEL = os.getenv("ROCKET_WHISPER_MODEL", "base")
 
 
 class SpeechManager:
@@ -30,6 +32,7 @@ class SpeechManager:
         api_key: str | None = None,
         language_code: str | None = None,
         asr_service: object | None = None,
+        whisper_model: str | None = None,
     ) -> None:
         self.server = server
         self.function_id = function_id or os.getenv("ROCKET_RIVA_FUNCTION_ID", RIVA_FUNCTION_ID)
@@ -37,31 +40,41 @@ class SpeechManager:
         # "multi" enables Riva automatic language detection.
         self.language_code = language_code or os.getenv("ROCKET_RIVA_LANGUAGE", "multi")
         self._asr_service = asr_service
+        self._whisper_model_name = whisper_model or DEFAULT_WHISPER_MODEL
+        self._whisper_model = None
         self.status: str = "unchecked"
 
     @property
     def available(self) -> bool:
         """Whether any speech-to-text path can be attempted.
 
-        Always True when ``speech_recognition`` is installed (local fallback).
+        Always True when faster-whisper or speech_recognition is installed.
         """
 
         if os.getenv("ROCKET_DISABLE_SPEECH"):
             return False
         if self._asr_service is not None:
             return True
+        # faster-whisper (best accuracy)
+        try:
+            from faster_whisper import WhisperModel  # noqa: F401
+            return True
+        except Exception:
+            pass
+        # speech_recognition (Google API fallback)
+        try:
+            import speech_recognition  # noqa: F401
+            return True
+        except Exception:
+            pass
+        # Riva
         if self._api_key:
             try:
                 import riva.client  # noqa: F401
                 return True
             except Exception:
                 pass
-        # Local fallback via speech_recognition
-        try:
-            import speech_recognition  # noqa: F401
-            return True
-        except Exception:
-            return False
+        return False
         try:
             import riva.client  # noqa: F401
         except Exception:
@@ -86,21 +99,29 @@ class SpeechManager:
     def transcribe(self, audio_bytes: bytes, *, audio_format: str = "wav") -> str:
         """Return the transcript for ``audio_bytes``.
 
-        Primary: local speech_recognition (Google free API, fast, reliable).
-        Fallback: Riva (if API key set and library installed).
-        Raises only if ALL paths fail.
+        Chain: faster-whisper (local, most accurate) → speech_recognition
+        (Google API) → Riva. Raises only if ALL paths fail.
         """
 
-        # Primary: local speech_recognition (always try first, fastest)
+        # 1. faster-whisper (best accuracy, runs locally)
         try:
-            transcript = self._transcribe_local(audio_bytes, audio_format)
+            transcript = self._transcribe_whisper(audio_bytes)
             if transcript:
-                self.status = "ok (local)"
+                self.status = "ok (whisper-local)"
                 return transcript
         except Exception:
             pass
 
-        # Fallback: Riva if available
+        # 2. speech_recognition (Google free API)
+        try:
+            transcript = self._transcribe_local(audio_bytes, audio_format)
+            if transcript:
+                self.status = "ok (google)"
+                return transcript
+        except Exception:
+            pass
+
+        # 3. Riva if available
         if self._riva_available():
             try:
                 transcript = self._transcribe_riva(audio_bytes)
@@ -110,7 +131,40 @@ class SpeechManager:
             except Exception:
                 pass
 
-        raise RuntimeError("All speech-to-text paths failed (local + Riva).")
+        raise RuntimeError("All speech-to-text paths failed (whisper + google + riva).")
+
+    def _transcribe_whisper(self, audio_bytes: bytes) -> str:
+        """Transcribe using faster-whisper (local Whisper model)."""
+
+        from faster_whisper import WhisperModel
+
+        if self._whisper_model is None:
+            self._whisper_model = WhisperModel(
+                self._whisper_model_name,
+                device="cpu",
+                compute_type="int8",
+            )
+
+        # Write audio to a temp file (faster-whisper needs a file path)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        try:
+            segments, _info = self._whisper_model.transcribe(
+                tmp_path,
+                beam_size=5,
+                language=None,  # auto-detect
+                vad_filter=True,  # skip silence
+            )
+            text = " ".join(segment.text.strip() for segment in segments).strip()
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        return text
 
     def _riva_available(self) -> bool:
         if self._asr_service is not None:
