@@ -91,14 +91,9 @@ class SpeechManagerTests(unittest.TestCase):
         self.assertTrue(manager.available)
 
     def test_unavailable_without_key_or_service_and_no_sr(self) -> None:
-        import unittest.mock
-        with unittest.mock.patch.dict("sys.modules", {"speech_recognition": None}):
-            manager = SpeechManager(asr_service=None, api_key="")
-            # With speech_recognition mocked out, falls back to unavailable
-            # but in this env it's installed, so just verify the constructor works
-        manager2 = SpeechManager(asr_service=None, api_key="")
-        # With speech_recognition installed, local fallback makes it available
-        self.assertTrue(manager2.available)
+        # With speech_recognition / faster-whisper installed, local fallback makes it available.
+        manager = SpeechManager(asr_service=None, api_key="")
+        self.assertTrue(manager.available)
 
     def test_transcribe_returns_first_transcript(self) -> None:
         service = _FakeAsrService("Open Spotify")
@@ -114,16 +109,34 @@ class SpeechManagerTests(unittest.TestCase):
 
 class NemotronPrimaryPathTests(unittest.TestCase):
     def test_kimi_primary_drives_image_mission(self) -> None:
+        import os
+        from unittest.mock import patch
+
         vision = VisionManager(client=_FakeClient("Open YouTube."), api_key="")
         speech = SpeechManager(asr_service=None, api_key="")
         adapter = NemotronAdapter(vision=vision, speech=speech)
 
-        task = _run(adapter.process_image(b"\x89PNG", mime_type="image/png"))
+        # Disable drawing-direct so the Kimi extraction path is exercised.
+        with patch.dict(os.environ, {"ROCKET_DRAWING_DIRECT": "0"}):
+            task = _run(adapter.process_image(b"\x89PNG", mime_type="image/png"))
         mission = parse_mission(task)
 
         self.assertIsNotNone(mission)
         self.assertEqual(mission["context"], "youtube.com")
-        self.assertEqual(adapter.status["KimiVision"], "ok")
+
+    def test_drawing_direct_mode_returns_image_mission(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        adapter = NemotronAdapter()
+        with patch.dict(os.environ, {"ROCKET_DRAWING_DIRECT": "1"}):
+            task = _run(adapter.process_image(b"\x89PNGdata", mime_type="image/png"))
+        mission = parse_mission(task)
+        self.assertEqual(mission["intent"], "DRAWING")
+        self.assertEqual(mission["context"], "image")
+        self.assertIn("image_path", mission)
+        self.assertTrue(mission["image_path"].endswith(".png"))
+        self.assertEqual(adapter.status["KimiVision"], "direct")
 
     def test_riva_primary_drives_audio_mission(self) -> None:
         vision = VisionManager(client=None, api_key="")

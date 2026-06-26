@@ -33,6 +33,26 @@ _SERVER_PROCESS: subprocess.Popen[str] | None = None
 _SERVER_URL = ""
 
 
+def _powershell_quote(arg: str) -> str:
+    """Single-quote an argument for PowerShell, escaping embedded quotes."""
+
+    return "'" + str(arg).replace("'", "''") + "'"
+
+
+def _powershell_wrap(command: list[str]) -> list[str]:
+    """Wrap an OpenCode command list into a PowerShell (not cmd) invocation."""
+
+    inner = "& " + " ".join(_powershell_quote(part) for part in command)
+    return [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        inner,
+    ]
+
+
 class OpenCodeCliClient:
     """Execute Rocket tasks through OpenCode without using any chat UI."""
 
@@ -53,7 +73,7 @@ class OpenCodeCliClient:
         self.history = history or []
         self.session_id = session_id
         self.browser_state = BrowserState.from_dict(browser_state)
-        self.command = os.getenv("ROCKET_OPENCODE_COMMAND", "opencode.cmd")
+        self.command = os.getenv("ROCKET_OPENCODE_COMMAND", "opencode")
         self.agent = os.getenv("ROCKET_OPENCODE_AGENT", "rocket-blind")
         self.models = _configured_models()
         self.model = self.models[0]
@@ -126,11 +146,16 @@ class OpenCodeCliClient:
         if self.print_logs:
             command.extend(["--print-logs", "--log-level", os.getenv("ROCKET_OPENCODE_LOG_LEVEL", "INFO")])
         command.append("--dangerously-skip-permissions")
+        # Attach a drawing image directly so the vision model (MIMO) can see it.
+        mission = parse_mission(task)
+        image_path = str(mission.get("image_path", "")) if mission else ""
+        if image_path and os.path.exists(image_path):
+            command.extend(["--file", image_path])
         env = os.environ.copy()
         env.update(self.runtime_env)
         try:
             completed = subprocess.run(
-                command,
+                _powershell_wrap(command),
                 cwd=self._execution_dir(),
                 env=env,
                 text=True,
@@ -495,17 +520,19 @@ def _ensure_opencode_server(command: str, execution_dir: Path, runtime_env: dict
     stderr = (log_dir / "opencode_server.err").open("a", encoding="utf-8")
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     _SERVER_PROCESS = subprocess.Popen(
-        [
-            command,
-            "serve",
-            "--hostname",
-            host,
-            "--port",
-            str(port),
-            "--print-logs",
-            "--log-level",
-            os.getenv("ROCKET_OPENCODE_SERVER_LOG_LEVEL", "INFO"),
-        ],
+        _powershell_wrap(
+            [
+                command,
+                "serve",
+                "--hostname",
+                host,
+                "--port",
+                str(port),
+                "--print-logs",
+                "--log-level",
+                os.getenv("ROCKET_OPENCODE_SERVER_LOG_LEVEL", "INFO"),
+            ]
+        ),
         cwd=execution_dir,
         env=env,
         text=True,

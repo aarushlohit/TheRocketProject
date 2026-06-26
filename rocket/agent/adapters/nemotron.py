@@ -7,7 +7,9 @@ import base64
 import json
 import os
 import re
+import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -128,6 +130,34 @@ class NemotronAdapter:
         self._runtime_context = json.dumps(compact, ensure_ascii=True)
 
     async def process_image(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
+        # Drawing-direct mode: hand the raw image straight to OpenCode's vision
+        # model (MIMO v2.5). No text extraction — OpenCode interprets the drawing.
+        if os.getenv("ROCKET_DRAWING_DIRECT", "1").strip().lower() not in {"0", "false", "no"}:
+            try:
+                image_path = _save_drawing(image_bytes, mime_type)
+                mission = {
+                    "intent": "DRAWING",
+                    "context": "image",
+                    "mission": (
+                        "Look at the attached drawing and do exactly what it asks. "
+                        "Reframe rough or unclear intent into a clear goal, then execute it."
+                    ),
+                    "complexity": "MEDIUM",
+                    "estimated_steps": 3,
+                    "success_criteria": ["goal_achieved_in_reality"],
+                    "instructions": [
+                        "Interpret the attached drawing image",
+                        "Reuse an already-open window if the app is open; otherwise open it",
+                        "Work in full screen on the real visible app; reuse the default Chrome profile",
+                        "Execute the intended task and verify it on screen",
+                    ],
+                    "image_path": str(image_path),
+                }
+                self.status["KimiVision"] = "direct"
+                return mission_to_task(mission)
+            except Exception as error:
+                self.status["KimiVision"] = f"direct-fallback: {error}"
+
         if self.vision.available:
             try:
                 raw_command = await self.vision.parse_command(
@@ -168,7 +198,8 @@ class NemotronAdapter:
                     return task
             except Exception as error:
                 self.status["Speech"] = f"fallback: {error}"
-                import sys; print(f"[Speech] all paths failed: {error}", file=sys.stderr)
+                import sys
+                print(f"[Speech] all paths failed: {error}", file=sys.stderr)
         encoded_audio = base64.b64encode(audio_bytes).decode("ascii")
         normalized_format = _audio_format(audio_format)
         content: list[dict[str, Any]] = [
@@ -311,6 +342,21 @@ class NemotronAdapter:
 def _data_url(mime_type: str, payload: bytes) -> str:
     encoded = base64.b64encode(payload).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _save_drawing(image_bytes: bytes, mime_type: str = "image/png") -> Path:
+    """Persist a drawing image so OpenCode's vision model can read it."""
+
+    ext = "png"
+    if "jpeg" in mime_type or "jpg" in mime_type:
+        ext = "jpg"
+    elif "webp" in mime_type:
+        ext = "webp"
+    drawings_dir = Path(os.getenv("ROCKET_DRAWINGS_DIR", str(Path.home() / ".rocket" / "drawings")))
+    drawings_dir.mkdir(parents=True, exist_ok=True)
+    path = drawings_dir / f"drawing_{int(time.time() * 1000)}.{ext}"
+    path.write_bytes(image_bytes)
+    return path
 
 
 def _audio_format(value: str) -> str:

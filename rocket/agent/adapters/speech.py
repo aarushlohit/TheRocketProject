@@ -222,7 +222,6 @@ class SpeechManager:
 
         try:
             import speech_recognition as sr
-            import struct
             import wave
 
             # Wrap raw PCM into a WAV in memory

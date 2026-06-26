@@ -143,10 +143,13 @@ class OpenCodeRuntimeTests(unittest.TestCase):
         client = OpenCodeCliClient(Path.cwd(), profile=RocketProfile())
 
         def fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
-            self.assertIn("--dangerously-skip-permissions", command)
-            self.assertEqual(command[command.index("--agent") + 1], "rocket-blind")
-            self.assertNotIn("--attach", command)
-            self.assertNotIn("--session", command)
+            # Command is now wrapped in a PowerShell invocation; flags live in the -Command string.
+            joined = " ".join(command)
+            self.assertEqual(command[0], "powershell.exe")
+            self.assertIn("--dangerously-skip-permissions", joined)
+            self.assertIn("rocket-blind", joined)
+            self.assertNotIn("--attach", joined)
+            self.assertNotIn("--session", joined)
             return CompletedProcess(command, 0, stdout='{"message":"ok"}\n', stderr="")
 
         with (
