@@ -65,7 +65,7 @@ class NemotronAdapter:
             "MissionCompiler": "unchecked",
             "Pollinations": "configured" if fallback else "disabled",
             "KimiVision": "configured" if self.vision.available else "disabled",
-            "RivaSpeech": "configured" if self.speech.available else "disabled",
+            "Speech": "configured" if self.speech.available else "disabled",
         }
         self._last_task = ""
         self._active_app = ""
@@ -77,7 +77,7 @@ class NemotronAdapter:
     async def health_check(self) -> None:
         self.status["Nemotron"] = "configured" if os.getenv("NVIDIA_API_KEY") else "missing NVIDIA_API_KEY"
         self.status["KimiVision"] = "configured" if self.vision.available else "disabled"
-        self.status["RivaSpeech"] = "configured" if self.speech.available else "disabled"
+        self.status["Speech"] = self.speech.status if self.speech.status != "unchecked" else ("configured" if self.speech.available else "disabled")
 
     def set_profile_context(self, profile: dict[str, Any] | None, system_prompt: str = "") -> None:
         if not profile:
@@ -158,14 +158,14 @@ class NemotronAdapter:
                 transcript = await asyncio.to_thread(
                     self.speech.transcribe, audio_bytes, audio_format=audio_format
                 )
-                self.status["RivaSpeech"] = "ok"
+                self.status["Speech"] = "ok"
                 task = await self._compile_with_mission_model(_clean_task(transcript))
                 if task:
                     if _should_remember_task(task):
                         self._remember_task(task)
                     return task
             except Exception as error:
-                self.status["RivaSpeech"] = f"fallback: {error}"
+                self.status["Speech"] = f"fallback: {error}"
 
         encoded_audio = base64.b64encode(audio_bytes).decode("ascii")
         normalized_format = _audio_format(audio_format)

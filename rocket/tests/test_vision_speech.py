@@ -135,7 +135,7 @@ class NemotronPrimaryPathTests(unittest.TestCase):
 
         self.assertIsNotNone(mission)
         self.assertEqual(mission["context"], "youtube.com")
-        self.assertEqual(adapter.status["RivaSpeech"], "ok")
+        self.assertEqual(adapter.status["Speech"], "ok")
 
     def test_status_reports_disabled_when_vision_unavailable(self) -> None:
         adapter = NemotronAdapter(
