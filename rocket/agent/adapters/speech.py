@@ -86,11 +86,21 @@ class SpeechManager:
     def transcribe(self, audio_bytes: bytes, *, audio_format: str = "wav") -> str:
         """Return the transcript for ``audio_bytes``.
 
-        Tries Riva first, then falls back to local speech_recognition (Google
-        free web API). Raises only if ALL paths fail.
+        Primary: local speech_recognition (Google free API, fast, reliable).
+        Fallback: Riva (if API key set and library installed).
+        Raises only if ALL paths fail.
         """
 
-        # Try Riva first if available
+        # Primary: local speech_recognition (always try first, fastest)
+        try:
+            transcript = self._transcribe_local(audio_bytes, audio_format)
+            if transcript:
+                self.status = "ok (local)"
+                return transcript
+        except Exception:
+            pass
+
+        # Fallback: Riva if available
         if self._riva_available():
             try:
                 transcript = self._transcribe_riva(audio_bytes)
@@ -100,16 +110,7 @@ class SpeechManager:
             except Exception:
                 pass
 
-        # Local fallback via speech_recognition
-        try:
-            transcript = self._transcribe_local(audio_bytes, audio_format)
-            if transcript:
-                self.status = "ok (local)"
-                return transcript
-        except Exception:
-            pass
-
-        raise RuntimeError("All speech-to-text paths failed (Riva + local).")
+        raise RuntimeError("All speech-to-text paths failed (local + Riva).")
 
     def _riva_available(self) -> bool:
         if self._asr_service is not None:
@@ -134,9 +135,19 @@ class SpeechManager:
         import speech_recognition as sr
 
         recognizer = sr.Recognizer()
+        recognizer.energy_threshold = 300
+        recognizer.dynamic_energy_threshold = False
+
         audio_file = io.BytesIO(audio_bytes)
-        with sr.AudioFile(audio_file) as source:
-            audio_data = recognizer.record(source)
+        try:
+            with sr.AudioFile(audio_file) as source:
+                audio_data = recognizer.record(source)
+        except Exception:
+            # If the audio can't be read as-is, try wrapping raw PCM as WAV
+            audio_data = self._raw_to_audio_data(audio_bytes)
+            if audio_data is None:
+                return ""
+
         try:
             text = recognizer.recognize_google(audio_data)
         except sr.UnknownValueError:
@@ -144,6 +155,29 @@ class SpeechManager:
         except sr.RequestError:
             return ""
         return str(text).strip() if text else ""
+
+    @staticmethod
+    def _raw_to_audio_data(audio_bytes: bytes):
+        """Try to interpret raw bytes as 16-bit mono 16kHz PCM and wrap for SR."""
+
+        try:
+            import speech_recognition as sr
+            import struct
+            import wave
+
+            # Wrap raw PCM into a WAV in memory
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(audio_bytes)
+            buf.seek(0)
+            with sr.AudioFile(buf) as source:
+                recognizer = sr.Recognizer()
+                return recognizer.record(source)
+        except Exception:
+            return None
 
     def _build_config(self, audio_bytes: bytes):
         try:
