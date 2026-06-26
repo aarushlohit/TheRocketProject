@@ -101,6 +101,14 @@ class RocketWebSocketServer:
                 audio_bytes = _decode_base64(message.get("data"))
                 audio_format = str(message.get("format") or message.get("mime_type") or "wav")
                 self.terminal.log(f"{client_id}: audio received — {len(audio_bytes)} bytes, format={audio_format}")
+                # DEBUG: save latest audio for diagnosis
+                try:
+                    import pathlib
+                    debug_path = pathlib.Path.home() / "Downloads" / "rocket_last_audio.wav"
+                    debug_path.write_bytes(audio_bytes)
+                    self.terminal.log(f"{client_id}: saved debug audio to {debug_path}")
+                except Exception:
+                    pass
                 if len(audio_bytes) < 512:
                     self.terminal.log(f"{client_id}: audio too short ({len(audio_bytes)} bytes), requesting retry")
                     await _send(

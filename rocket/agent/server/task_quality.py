@@ -88,7 +88,6 @@ def assess_task_quality(task: str) -> TaskQuality:
                 context,
                 mission_text,
                 " ".join(str(item) for item in mission.get("success_criteria", [])),
-                " ".join(str(item) for item in mission.get("instructions", [])),
             ]
         ).lower()
         if any(phrase in combined for phrase in _BAD_PHRASES):
