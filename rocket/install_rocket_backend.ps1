@@ -44,6 +44,17 @@ pause
 
 Set-Content -Path $Launcher -Value $LauncherContent -Encoding ASCII
 
+$PersistedEnvDir = Join-Path $env:LOCALAPPDATA "RocketBackend"
+$PersistedEnvFile = Join-Path $PersistedEnvDir "backend.env"
+New-Item -ItemType Directory -Force -Path $PersistedEnvDir | Out-Null
+if (Test-Path (Join-Path $ProjectRoot ".env")) {
+    Copy-Item -Force (Join-Path $ProjectRoot ".env") $PersistedEnvFile
+    Write-Host "Persisted env copied to $PersistedEnvFile"
+} elseif (-not (Test-Path $PersistedEnvFile)) {
+    Set-Content -Path $PersistedEnvFile -Value "# Add NVIDIA_API_KEY here for Rocket Backend" -Encoding ASCII
+    Write-Host "Created placeholder persisted env at $PersistedEnvFile"
+}
+
 function New-RocketShortcut {
     param(
         [Parameter(Mandatory=$true)][string]$Path

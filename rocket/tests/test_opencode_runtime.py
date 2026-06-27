@@ -31,6 +31,7 @@ from agent.runtime.opencode_cli_client import (
     _short_run_message,
 )
 from agent.runtime.memory import RocketProfile
+from agent.runtime.memory import RocketMemory
 from agent.runtime.results import RocketExecutionResult
 
 
@@ -215,6 +216,28 @@ class OpenCodeRuntimeTests(unittest.TestCase):
                 config = load_config(config_path=Path(root) / "missing.yaml")
 
         self.assertEqual(config.data_dir, Path(root))
+
+    def test_contact_alias_learning_persists_and_resolves(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory = RocketMemory(Path(tmp))
+            memory.save_contact_alias("Ashley Mimisha", "Ashlin Mirsha")
+
+            self.assertEqual(memory.resolve_contact_alias("Ashley Mimisha"), "Ashlin Mirsha")
+            self.assertEqual(memory.resolve_contact_alias("Ashley Mimisha?"), "Ashlin Mirsha")
+            self.assertEqual(memory.resolve_contact_alias("Unknown Person"), "Unknown Person")
+
+    def test_adapter_rewrites_task_using_persistent_contact_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            data_dir = repo_root / "data"
+            adapter = RocketAdapter(repo_root=repo_root, data_dir=data_dir)
+            adapter.memory.save_contact_alias("Ashley Mimisha", "Ashlin Mirsha")
+            rewritten = adapter._apply_persistent_learning(
+                "Open WhatsApp and send good morning to Ashley Mimisha"
+            )
+
+            self.assertIn("Ashlin Mirsha", rewritten)
+            self.assertNotIn("Ashley Mimisha", rewritten)
 
     def test_browser_mission_tracks_tabs_and_context(self) -> None:
         state = BrowserState(current_site="youtube.com", browser_open=True)

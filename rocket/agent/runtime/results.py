@@ -14,4 +14,5 @@ class RocketExecutionResult:
     executor: str
     success: bool
     message: str
+    duration_ms: int = 0
     details: list[str] = field(default_factory=list)

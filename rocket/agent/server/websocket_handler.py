@@ -202,6 +202,11 @@ class RocketWebSocketServer:
             {
                 "type": "execution_result",
                 **result,
+                "timing": {
+                    "latency_ms": latency_ms,
+                    "execution_ms": int(result.get("duration_ms") or 0),
+                    "total_ms": latency_ms + int(result.get("duration_ms") or 0),
+                },
             },
         )
 

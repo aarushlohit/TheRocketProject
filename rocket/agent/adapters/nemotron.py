@@ -1,4 +1,4 @@
-"""NVIDIA Nemotron Omni adapter."""
+﻿"""NVIDIA Nemotron Omni adapter."""
 
 from __future__ import annotations
 
@@ -130,58 +130,43 @@ class NemotronAdapter:
         self._runtime_context = json.dumps(compact, ensure_ascii=True)
 
     async def process_image(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
-        # Drawing-direct mode: hand the raw image straight to OpenCode's vision
-        # model (MIMO v2.5). No text extraction — OpenCode interprets the drawing.
-        if os.getenv("ROCKET_DRAWING_DIRECT", "1").strip().lower() not in {"0", "false", "no"}:
-            try:
-                image_path = _save_drawing(image_bytes, mime_type)
-                mission = {
-                    "intent": "DRAWING",
-                    "context": "image",
-                    "mission": (
-                        "Look at the attached drawing and do exactly what it asks. "
-                        "Reframe rough or unclear intent into a clear goal, then execute it."
-                    ),
-                    "complexity": "MEDIUM",
-                    "estimated_steps": 3,
-                    "success_criteria": ["goal_achieved_in_reality"],
-                    "instructions": [
-                        "Interpret the attached drawing image",
-                        "Reuse an already-open window if the app is open; otherwise open it",
-                        "Work in full screen on the real visible app; reuse the default Chrome profile",
-                        "Execute the intended task and verify it on screen",
-                    ],
-                    "image_path": str(image_path),
-                }
-                self.status["KimiVision"] = "direct"
-                return mission_to_task(mission)
-            except Exception as error:
-                self.status["KimiVision"] = f"direct-fallback: {error}"
-
-        if self.vision.available:
-            try:
-                raw_command = await self.vision.parse_command(
+        try:
+            image_paths = _save_drawing_variants(image_bytes, mime_type)
+            mission = {
+                "intent": "DRAWING",
+                "context": "image",
+                "mission": (
+                    "Interpret the attached drawing and execute the visible command."
+                ),
+                "complexity": "MEDIUM",
+                "estimated_steps": 3,
+                "success_criteria": ["goal_achieved_in_reality"],
+                "instructions": [
+                    "Interpret the attached drawing image directly",
+                    "Use all attached drawing views if they help",
+                    "Reuse an already-open window if the app is open; otherwise open it",
+                    "Work in full screen on the real visible app; reuse the default Chrome profile",
+                    "Execute the intended task and verify it on screen",
+                ],
+                "image_paths": [str(path) for path in image_paths],
+            }
+            self.status["KimiVision"] = "direct"
+            return mission_to_task(mission)
+        except Exception as error:
+            self.status["KimiVision"] = f"direct-fallback: {error}"
+            if self.fallback is not None:
+                command = self.fallback.process_image(
                     image_bytes,
                     mime_type=mime_type,
-                    system_prompt=ROCKET_PARSER_SYSTEM_PROMPT,
-                    user_prompt=parser_user_prompt("image", context=self._context_text()),
+                    context=self._context_text(),
                 )
-                self.status["KimiVision"] = "ok"
-                task = await self._compile_with_mission_model(_clean_task(raw_command))
+                self.status["Pollinations"] = "ok"
+                task = await self._compile_with_mission_model(_clean_task(command))
                 if task:
                     if _should_remember_task(task):
                         self._remember_task(task)
                     return task
-            except Exception as error:
-                self.status["KimiVision"] = f"fallback: {error}"
-
-        data_url = _data_url(mime_type, image_bytes)
-        content: list[dict[str, Any]] = [
-            {"type": "text", "text": parser_user_prompt("image", context=self._context_text())},
-            {"type": "image_url", "image_url": {"url": data_url}},
-        ]
-        return await self._complete("image", content)
-
+            raise
     async def process_audio(self, audio_bytes: bytes, audio_format: str = "wav") -> str:
         if self.speech.available:
             try:
@@ -189,7 +174,7 @@ class NemotronAdapter:
                     self.speech.transcribe, audio_bytes, audio_format=audio_format
                 )
                 if transcript and transcript.strip():
-                    # Compile directly from transcript — skip the slow mission compiler LLM call.
+                    # Compile directly from transcript â€” skip the slow mission compiler LLM call.
                     # The transcript is already clean speech; compile_browser_mission handles intent.
                     task = self._compile_task(transcript.strip())
                     self.status["Speech"] = "ok"
@@ -359,6 +344,27 @@ def _save_drawing(image_bytes: bytes, mime_type: str = "image/png") -> Path:
     return path
 
 
+def _save_drawing_variants(image_bytes: bytes, mime_type: str = "image/png") -> list[Path]:
+    """Persist the original drawing plus a few rotated variants when possible."""
+
+    original = _save_drawing(image_bytes, mime_type)
+    variants = [original]
+    try:
+        from PIL import Image
+        from io import BytesIO
+
+        with Image.open(BytesIO(image_bytes)) as image:
+            for suffix, angle in (("rot90", 90), ("rot180", 180), ("rot270", 270)):
+                rotated = image.rotate(angle, expand=True)
+                drawings_dir = original.parent
+                variant = drawings_dir / f"{original.stem}_{suffix}{original.suffix}"
+                rotated.save(variant)
+                variants.append(variant)
+    except Exception:
+        return variants
+    return variants
+
+
 def _audio_format(value: str) -> str:
     cleaned = value.strip().lower().lstrip(".")
     if cleaned in {"wav", "mp3", "flac", "ogg"}:
@@ -478,3 +484,4 @@ def _looks_like_parser_garbage(value: str) -> bool:
             return True
     repeated_numbers = re.findall(r"(?:^|[,\s])1(?:\.5)?(?=[,\s]|$)", value)
     return len(repeated_numbers) >= 10
+

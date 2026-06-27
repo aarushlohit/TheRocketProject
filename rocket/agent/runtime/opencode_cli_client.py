@@ -146,11 +146,12 @@ class OpenCodeCliClient:
         if self.print_logs:
             command.extend(["--print-logs", "--log-level", os.getenv("ROCKET_OPENCODE_LOG_LEVEL", "INFO")])
         command.append("--dangerously-skip-permissions")
-        # Attach a drawing image directly so the vision model (MIMO) can see it.
+        # Attach drawing images directly so the vision model (MIMO) can see them.
         mission = parse_mission(task)
-        image_path = str(mission.get("image_path", "")) if mission else ""
-        if image_path and os.path.exists(image_path):
-            command.extend(["--file", image_path])
+        image_paths = _mission_image_paths(mission)
+        for image_path in image_paths:
+            if image_path and os.path.exists(image_path):
+                command.extend(["--file", image_path])
         env = os.environ.copy()
         env.update(self.runtime_env)
         try:
@@ -498,7 +499,7 @@ def _configured_models() -> list[str]:
 
 
 def _configured_timeout() -> int | None:
-    value = os.getenv("ROCKET_OPENCODE_TIMEOUT_SECONDS", "60").strip().lower()
+    value = os.getenv("ROCKET_OPENCODE_TIMEOUT_SECONDS", "120").strip().lower()
     if value in {"0", "none", "false", "no", "off"}:
         return None
     return int(value)
@@ -728,6 +729,21 @@ def _should_cleanup_after_success(task: str, expectation: dict[str, str]) -> boo
     if label in {"chrome", "edge", "youtube", "spotify", "whatsapp", "vscode", "code"}:
         return False
     return cleanup_policy(parse_mission(task)) == "temporary"
+
+
+def _mission_image_paths(mission: dict[str, Any] | None) -> list[str]:
+    if not isinstance(mission, dict):
+        return []
+    paths: list[str] = []
+    raw_paths = mission.get("image_paths")
+    if isinstance(raw_paths, list):
+        for value in raw_paths:
+            if isinstance(value, str) and value.strip():
+                paths.append(value.strip())
+    raw_path = mission.get("image_path")
+    if isinstance(raw_path, str) and raw_path.strip():
+        paths.append(raw_path.strip())
+    return paths
 
 
 def _close_expected_app(expectation: dict[str, str]) -> str:

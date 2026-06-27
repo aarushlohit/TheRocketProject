@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import re
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,7 @@ class RocketAdapter:
         if os.getenv("ROCKET_PHASE2_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
             return RocketExecutionResult(task, "disabled", "rocket_adapter", False, "Runtime execution disabled.")
 
+        started = time.perf_counter()
         report = self.runtime.ensure_ready()
         self._last_report = report
         self.memory.set("runtime_readiness", report.__dict__)
@@ -96,12 +98,23 @@ class RocketAdapter:
                 details=report.actions,
             )
 
+        learned_task = self._apply_persistent_learning(task)
         self.opencode.runtime_env = self.runtime.execution_env()
         self.opencode.history = self._history()
         self.opencode.session_id = str(self.memory.get("opencode_session_id", "") or "")
         self.opencode.browser_state = self._browser_state()
-        result = run_with_recovery(task, self.opencode.execute, self.verifier_suite)
+        result = run_with_recovery(learned_task, self.opencode.execute, self.verifier_suite)
+        result = RocketExecutionResult(
+            task=result.task,
+            intent=result.intent,
+            executor=result.executor,
+            success=result.success,
+            message=result.message,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            details=result.details,
+        )
         self._remember_execution(result)
+        self._learn_from_execution(task, learned_task, result)
         return result
 
     def _load_profile(self) -> RocketProfile:
@@ -145,6 +158,39 @@ class RocketAdapter:
         if result.success:
             self.memory.set("last_successful_execution", event)
 
+    def _apply_persistent_learning(self, task: str) -> str:
+        resolved = task
+        aliases = self.memory.load_contact_aliases()
+        for spoken, actual in aliases.items():
+            if not spoken or not actual:
+                continue
+            pattern = re.compile(rf"\b{re.escape(spoken)}\b", re.IGNORECASE)
+            resolved = pattern.sub(actual, resolved)
+        spoken_name = _extract_contact_name(resolved)
+        if spoken_name:
+            learned = self.memory.resolve_contact_alias(spoken_name)
+            if learned and learned != spoken_name:
+                resolved = resolved.replace(spoken_name, learned)
+        return resolved
+
+    def _learn_from_execution(self, original_task: str, learned_task: str, result: RocketExecutionResult) -> None:
+        if not result.success:
+            return
+        if "whatsapp" not in original_task.lower() and "message" not in original_task.lower():
+            return
+        spoken_name = _extract_contact_name(original_task)
+        resolved_name = _extract_contact_name(learned_task)
+        if not spoken_name:
+            return
+        if resolved_name:
+            self.memory.save_contact_alias(spoken_name, resolved_name)
+            return
+        inferred = _extract_contact_name(result.message)
+        if inferred:
+            self.memory.save_contact_alias(spoken_name, inferred)
+            return
+        self.memory.save_contact_alias(spoken_name, spoken_name)
+
     def _remember_browser_state(self, result: RocketExecutionResult) -> None:
         mission = parse_mission(result.task)
         current = self._browser_state()
@@ -160,6 +206,22 @@ def _session_id_from_details(details: list[str]) -> str:
     for detail in details:
         if detail.startswith("session_id="):
             return detail.split("=", 1)[1].strip()
+    return ""
+
+
+def _extract_contact_name(task: str) -> str:
+    text = " ".join(task.strip().split())
+    patterns = (
+        r"(?:contact named|named|to|message|send message to|send to|chat with)\s+([A-Za-z][A-Za-z .'-]{1,60})",
+        r"WhatsApp\s+to\s+([A-Za-z][A-Za-z .'-]{1,60})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip(" .,:;!?")
+            candidate = re.split(r"\b(?:using|on|in|with|via|and)\b", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+            if candidate:
+                return candidate
     return ""
 
 

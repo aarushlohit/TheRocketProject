@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from difflib import get_close_matches
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,43 @@ class RocketMemory:
     def save_profile(self, profile: RocketProfile) -> None:
         self.set("profile", asdict(profile))
 
+    def load_contact_aliases(self) -> dict[str, str]:
+        raw = self.get("contact_aliases", {})
+        if not isinstance(raw, dict):
+            return {}
+        aliases: dict[str, str] = {}
+        for key, value in raw.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            normalized_key = _normalize_alias(key)
+            normalized_value = value.strip()
+            if normalized_key and normalized_value:
+                aliases[normalized_key] = normalized_value
+        return aliases
+
+    def save_contact_alias(self, spoken_name: str, resolved_name: str) -> None:
+        spoken = _normalize_alias(spoken_name)
+        resolved = resolved_name.strip()
+        if not spoken or not resolved:
+            return
+        aliases = self.load_contact_aliases()
+        aliases[spoken] = resolved
+        self.set("contact_aliases", aliases)
+
+    def resolve_contact_alias(self, spoken_name: str) -> str:
+        aliases = self.load_contact_aliases()
+        if not aliases:
+            return spoken_name.strip()
+        spoken = _normalize_alias(spoken_name)
+        if not spoken:
+            return spoken_name.strip()
+        if spoken in aliases:
+            return aliases[spoken]
+        matches = get_close_matches(spoken, aliases.keys(), n=1, cutoff=0.84)
+        if matches:
+            return aliases[matches[0]]
+        return spoken_name.strip()
+
     def set(self, key: str, value: Any) -> None:
         encoded = protect_text(json.dumps(value, ensure_ascii=True))
         with sqlite3.connect(self.path) as connection:
@@ -79,3 +117,7 @@ class RocketMemory:
         with sqlite3.connect(self.path) as connection:
             connection.execute("create table if not exists kv (key text primary key, value text not null)")
             connection.commit()
+
+
+def _normalize_alias(value: str) -> str:
+    return " ".join(value.strip().lower().split())

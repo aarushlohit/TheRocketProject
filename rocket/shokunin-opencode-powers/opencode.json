@@ -1,0 +1,84 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "allow",
+  "plugin": [
+    "superpowers@git+https://github.com/obra/superpowers.git"
+  ],
+  "mcp": {
+    "shokunin-memory": {
+      "type": "local",
+      "command": ["python", "~/.shokunin/memory/mcp-server.py"],
+      "enabled": true
+    },
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "enabled": true,
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
+      }
+    },
+    "google-workspace": {
+      "type": "local",
+      "command": ["npx", "-y", "google-tools-mcp"],
+      "enabled": true
+    },
+    "claude-screen": {
+      "type": "local",
+      "command": ["npx", "-y", "claude-screen-mcp"],
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@latest"],
+      "enabled": true
+    },
+    "computer-use": {
+      "type": "local",
+      "command": ["computer-use-mcp"],
+      "enabled": true
+    },
+    "obsidian": {
+      "type": "local",
+      "command": ["npx", "@bitbonsai/mcpvault@latest", "YOUR_OBSIDIAN_VAULT_PATH"],
+      "enabled": true
+    },
+    "darbot-windows": {
+      "type": "local",
+      "command": ["darbot-windows-mcp"],
+      "enabled": true
+    },
+    "weather": {
+      "type": "local",
+      "command": ["npx", "-y", "@dangahagan/weather-mcp@latest"],
+      "enabled": true
+    },
+    "mcp-notifications": {
+      "type": "local",
+      "command": ["npx", "-y", "@topvisor/mcp-notifications"],
+      "enabled": true
+    },
+    "mcp-personal-suite": {
+      "type": "local",
+      "command": ["npx", "-y", "mcp-personal-suite"],
+      "enabled": true
+    },
+    "neo-mcp": {
+      "type": "local",
+      "command": ["neo-mcp-daemon", "--mcp"],
+      "enabled": false,
+      "env": {
+        "NEO_SECRET_KEY": "YOUR_NEO_SECRET_KEY"
+      }
+    },
+    "youtube": {
+      "type": "local",
+      "command": ["npx", "-y", "@eat-pray-ai/yutu", "mcp"],
+      "enabled": false,
+      "env": {
+        "YUTU_CREDENTIAL": "YOUR_CLIENT_SECRET_PATH",
+        "YUTU_CACHE_TOKEN": "YOUR_TOKEN_PATH"
+      }
+    }
+  }
+}

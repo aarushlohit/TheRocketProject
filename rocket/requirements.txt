@@ -13,4 +13,4 @@ requests==2.33.1
 rich==14.2.0
 typer==0.20.0
 uiautomation==2.0.29
-websockets==16.0
+websockets==15.0.1

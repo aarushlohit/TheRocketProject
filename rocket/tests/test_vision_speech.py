@@ -7,6 +7,7 @@ from agent.adapters.nemotron import NemotronAdapter
 from agent.adapters.speech import SpeechManager
 from agent.adapters.vision import VisionManager
 from agent.runtime.browser_state import parse_mission
+from agent.server.task_quality import assess_task_quality
 
 
 class _FakeMessage:
@@ -108,37 +109,25 @@ class SpeechManagerTests(unittest.TestCase):
 
 
 class NemotronPrimaryPathTests(unittest.TestCase):
-    def test_kimi_primary_drives_image_mission(self) -> None:
-        import os
-        from unittest.mock import patch
+    def test_drawing_image_returns_direct_drawing_mission(self) -> None:
+        adapter = NemotronAdapter(
+            vision=VisionManager(client=_FakeClient("Open YouTube."), api_key=""),
+            speech=SpeechManager(asr_service=None, api_key=""),
+        )
 
-        vision = VisionManager(client=_FakeClient("Open YouTube."), api_key="")
-        speech = SpeechManager(asr_service=None, api_key="")
-        adapter = NemotronAdapter(vision=vision, speech=speech)
-
-        # Disable drawing-direct so the Kimi extraction path is exercised.
-        with patch.dict(os.environ, {"ROCKET_DRAWING_DIRECT": "0"}):
-            task = _run(adapter.process_image(b"\x89PNG", mime_type="image/png"))
+        task = _run(adapter.process_image(b"\x89PNG", mime_type="image/png"))
         mission = parse_mission(task)
 
         self.assertIsNotNone(mission)
-        self.assertEqual(mission["context"], "youtube.com")
-
-    def test_drawing_direct_mode_returns_image_mission(self) -> None:
-        import os
-        from unittest.mock import patch
-
-        adapter = NemotronAdapter()
-        with patch.dict(os.environ, {"ROCKET_DRAWING_DIRECT": "1"}):
-            task = _run(adapter.process_image(b"\x89PNGdata", mime_type="image/png"))
-        mission = parse_mission(task)
         self.assertEqual(mission["intent"], "DRAWING")
         self.assertEqual(mission["context"], "image")
-        self.assertIn("image_path", mission)
-        self.assertTrue(mission["image_path"].endswith(".png"))
+        self.assertIn("image_paths", mission)
+        self.assertTrue(mission["image_paths"])
+        self.assertTrue(all(path.endswith(".png") for path in mission["image_paths"]))
         self.assertEqual(adapter.status["KimiVision"], "direct")
+        self.assertTrue(assess_task_quality(task).accepted)
 
-    def test_riva_primary_drives_audio_mission(self) -> None:
+    def test_speech_primary_drives_audio_mission(self) -> None:
         vision = VisionManager(client=None, api_key="")
         speech = SpeechManager(asr_service=_FakeAsrService("Open YouTube."), api_key="")
         adapter = NemotronAdapter(vision=vision, speech=speech)
