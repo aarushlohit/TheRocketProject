@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$WebApp = Join-Path $Root "backend_web_app"
+$WebApp = Join-Path $Root "apps\web"
 $Spec = Join-Path $Root "packaging\RocketBackend.spec"
 $BackendDist = Join-Path $Root "dist\RocketBackend"
 $PackageDir = Join-Path $Root "dist\RocketBackendApp-NoVS"

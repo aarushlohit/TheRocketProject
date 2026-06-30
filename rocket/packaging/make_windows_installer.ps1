@@ -18,5 +18,5 @@ if (Test-Path $InnoCompiler) {
 } else {
     Write-Warning "Inno Setup compiler not found: $InnoCompiler"
     Write-Host "Install Inno Setup 6 to produce RocketBackendSetup.exe."
-    Write-Host "The ready-to-run app bundle is still available at backend_app\build\windows\x64\runner\Release"
+    Write-Host "The ready-to-run app bundle is still available at apps\desktop\build\windows\x64\runner\Release"
 }

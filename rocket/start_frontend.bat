@@ -2,10 +2,10 @@
 echo Starting Flutter Frontend...
 echo.
 
-cd /d "%~dp0\mobile_app"
+cd /d "%~dp0\apps\mobile"
 
 if not exist pubspec.yaml (
-    echo ERROR: Flutter project not found in mobile_app directory!
+    echo ERROR: Flutter project not found in apps\mobile directory!
     pause
     exit /b 1
 )

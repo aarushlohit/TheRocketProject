@@ -89,5 +89,14 @@ rocket/.playwright-mcp/
 rocket/.venv/
 rocket/data/
 rocket/logs/
-rocket/backend_start.log
-rocket/backend_start.err
+rocket/benchmark.json
+rocket/benchmark_live.json
+
+# Vendored / machine-local
+rocket/shokunin-opencode-powers/
+rocket/external/
+
+# Flutter build artifacts
+rocket/apps/mobile/build/
+rocket/apps/desktop/build/
+rocket/apps/web/build/

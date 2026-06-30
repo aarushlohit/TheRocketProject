@@ -21,7 +21,7 @@
 ## Build & Test
 
 - **Python backend**: virtual env at `.venv/`. Run `python -m agent.main` to start.
-- **Flutter apps**: located in `backend_app/`, `backend_web_app/`, `mobile_app/`. Use `flutter build` / `flutter test`.
+- **Flutter apps**: located in `apps/mobile/`, `apps/desktop/`, `apps/web/`. Use `flutter build` / `flutter test`.
 - **Testing Trophy approach**: 80% integration tests, 10% unit tests, 10% E2E. Test behavior, not implementation.
 - **Always run tests** after making changes: `pytest` for Python, `flutter test` for Flutter.
 - **Git**: use conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).

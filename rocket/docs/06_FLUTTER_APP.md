@@ -2,7 +2,7 @@
 
 Kept:
 
-- Main Flutter app under `mobile_app`.
+- Main Flutter app under `apps/mobile`.
 - Drawing canvas.
 - QR scanner.
 - Pairing store.
@@ -20,4 +20,4 @@ Removed:
 
 - HTTP execution API client.
 - Confirmation and triple-tap execution flow.
-- Duplicate nested `mobile_app/nova` project.
+- Duplicate nested `apps/mobile/nova` project.

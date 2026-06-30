@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$BackendApp = Join-Path $Root "backend_app"
+$BackendApp = Join-Path $Root "apps\desktop"
 $Spec = Join-Path $Root "packaging\RocketBackend.spec"
 $BackendDist = Join-Path $Root "dist\RocketBackend"
 $FlutterRelease = Join-Path $BackendApp "build\windows\x64\runner\Release"

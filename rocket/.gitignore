@@ -1,16 +1,82 @@
+# Environment & secrets
 .env
 .ENV
-.venv/
+*.env.local
+
+# Python
 __pycache__/
 .pytest_cache/
 *.pyc
+*.pyo
+*.pyd
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime-generated state
 data/
 logs/
-.playwright-mcp/
 benchmark.json
 benchmark_live.json
-mobile_app/.dart_tool/
-mobile_app/.flutter-plugins
-mobile_app/.flutter-plugins-dependencies
-mobile_app/.packages
-mobile_app/build/
+
+# OpenCode & MCP
+.opencode/
+.playwright-mcp/
+opencode.json
+
+# PyInstaller build outputs
+dist/
+build/
+*.spec.bak
+
+# Flutter – apps/mobile
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/.packages
+apps/mobile/build/
+
+# Flutter – apps/desktop
+apps/desktop/.dart_tool/
+apps/desktop/.flutter-plugins
+apps/desktop/.flutter-plugins-dependencies
+apps/desktop/.packages
+apps/desktop/build/
+
+# Flutter – apps/web
+apps/web/.dart_tool/
+apps/web/.flutter-plugins
+apps/web/.flutter-plugins-dependencies
+apps/web/.packages
+apps/web/build/
+
+# Labs / experiments
+labs/nemotron/outputs/
+labs/nemotron/samples/*.wav
+labs/nemotron/samples/*.png
+
+# Vendored / machine-local (never commit)
+shokunin-opencode-powers/
+external/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+backend_start.log
+backend_start.err
+
+# Node (packaging scripts pull in npm tools)
+node_modules/
+
+# Python distribution / packaging artifacts
+*.egg-info/
+*.egg
+MANIFEST
